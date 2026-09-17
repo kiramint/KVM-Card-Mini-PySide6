@@ -48,6 +48,7 @@ dkms.conf
 
 
 venv/
+.venv/
 *.pyc
 obj/
 build/

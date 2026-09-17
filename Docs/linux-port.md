@@ -115,13 +115,15 @@ Qt Multimedia 在 Linux 走 GStreamer + V4L2。需要：
 
 ## Linux 上建议的起步命令
 
+完整步骤见 [linux.md](./linux.md)。
+
 ```bash
 git checkout linux-port
 cd Client
 python3 -m venv .venv
 source .venv/bin/activate
-# 先手动去掉/跳过 pyWinhook、pywin32、win32_setctime 再装
-pip install -r requirements.txt
+pip install -r requirements.txt --ignore-requires-python
+python Mini-KVM.py
 ```
 
 系统包（Debian/Ubuntu 一类）：
@@ -129,5 +131,6 @@ pip install -r requirements.txt
 ```bash
 sudo apt install python3-venv libhidapi-hidraw0 libhidapi-libusb0 \
   gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
-  libxcb-cursor0
+  libxcb-cursor0 libxkbcommon-x11-0 libxcb-icccm4 libxcb-image0 \
+  libxcb-keysyms1 libxcb-render-util0 libxcb-xkb1
 ```

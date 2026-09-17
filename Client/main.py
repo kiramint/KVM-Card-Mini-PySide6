@@ -2,6 +2,7 @@ import os
 import queue
 import random
 import re
+import shutil
 import sys
 import tempfile
 import threading
@@ -9,13 +10,10 @@ import time
 from typing import Tuple
 
 import hid_def
-import pythoncom
-import pyWinhook as pyHook
 import server_simple
 import yaml
 from default import default_config
 from loguru import logger
-from PySide6 import *
 from PySide6.QtCore import *
 from PySide6.QtGui import *
 from PySide6.QtMultimedia import *
@@ -48,6 +46,66 @@ shift_symbol = [
 ]  # fmt: skip
 PATH = os.path.dirname(os.path.abspath(__file__))
 ARGV_PATH = os.path.dirname(os.path.abspath(sys.argv[0]))
+IS_WINDOWS = sys.platform.startswith("win")
+IS_LINUX = sys.platform.startswith("linux")
+
+if IS_WINDOWS:
+    import pythoncom
+    import pyWinhook as pyHook
+
+
+def _resolve_data_dir() -> str:
+    """Nuitka packages Data as data; the source tree keeps Data."""
+    for name in ("data", "Data"):
+        candidate = os.path.join(PATH, name)
+        if os.path.isdir(candidate):
+            return candidate
+    return os.path.join(PATH, "data")
+
+
+DATA_DIR = _resolve_data_dir()
+
+# Linux Qt/XKB nativeScanCode compatibility
+#
+# On Linux/XKB, Qt commonly reports native scan codes as:
+#     XKB keycode = Linux evdev keycode + 8
+#
+# The existing keyboard_scancode2hid mapping expects PC/Windows
+# Set-1 style scan codes, so translate Linux scan codes first.
+LINUX_EVDEV_TO_SET1 = {
+    96: 0x011C,  # Keypad Enter
+    97: 0x011D,  # Right Ctrl
+    98: 0x0135,  # Keypad /
+    99: 0x0137,  # Print Screen
+    100: 0x0138,  # Right Alt
+    102: 0x0147,  # Home
+    103: 0x0148,  # Up
+    104: 0x0149,  # Page Up
+    105: 0x014B,  # Left
+    106: 0x014D,  # Right
+    107: 0x014F,  # End
+    108: 0x0150,  # Down
+    109: 0x0151,  # Page Down
+    110: 0x0152,  # Insert
+    111: 0x0153,  # Delete
+    125: 0x015B,  # Left Super
+    126: 0x015C,  # Right Super
+    139: 0x015D,  # Menu
+}
+
+
+def normalize_native_scancode(scancode: int) -> int:
+    """Translate Linux Qt/XKB scan codes to the scan-code format
+    expected by the existing HID keyboard mapping.
+    """
+    if not IS_LINUX:
+        return scancode
+
+    evdev_code = scancode - 8
+    if evdev_code < 0:
+        return scancode
+    return LINUX_EVDEV_TO_SET1.get(evdev_code, evdev_code)
+
 
 if not os.path.exists(os.path.join(ARGV_PATH, "config.yaml")):
     with open(os.path.join(ARGV_PATH, "config.yaml"), "w") as f:
@@ -405,14 +463,14 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
         # 导入外部数据
         try:
             with open(
-                    os.path.join(PATH, "data", "keyboard_hid2code.yaml"), "r"
+                    os.path.join(DATA_DIR, "keyboard_hid2code.yaml"), "r"
             ) as load_f:
                 self.keyboard_hid2code = yaml.safe_load(load_f)
             with open(
-                    os.path.join(PATH, "data", "keyboard_scancode2hid.yml"), "r"
+                    os.path.join(DATA_DIR, "keyboard_scancode2hid.yml"), "r"
             ) as load_f:
                 self.keyboard_scancode2hid = yaml.safe_load(load_f)
-            with open(os.path.join(PATH, "data", "keyboard.yaml"), "r") as load_f:
+            with open(os.path.join(DATA_DIR, "keyboard.yaml"), "r") as load_f:
                 self.keyboard_code = yaml.safe_load(load_f)
             with open(os.path.join(ARGV_PATH, "config.yaml"), "r") as load_f:
                 self.configfile = yaml.safe_load(load_f)
@@ -756,12 +814,23 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
         self.reset_keymouse(4)
 
         self.hook_state = False
-        self.hook_manager = pyHook.HookManager()
-        self.hook_manager.KeyDown = self.hook_keyboard_down_event
-        self.hook_manager.KeyUp = self.hook_keyboard_up_event
-        self.pythoncom_timer = QTimer()
-        self.pythoncom_timer.timeout.connect(lambda: pythoncom.PumpWaitingMessages())
+        self.hook_manager = None
+        self.pythoncom_timer = None
         self.hook_pressed_keys = []
+        if IS_WINDOWS:
+            self.hook_manager = pyHook.HookManager()
+            self.hook_manager.KeyDown = self.hook_keyboard_down_event
+            self.hook_manager.KeyUp = self.hook_keyboard_up_event
+            self.pythoncom_timer = QTimer()
+            self.pythoncom_timer.timeout.connect(
+                lambda: pythoncom.PumpWaitingMessages()
+            )
+        else:
+            self.actionSystem_hook.setVisible(False)
+            self.actionOn_screen_Keyboard.setVisible(False)
+            self.actionWindows_Audio_Setting.setVisible(False)
+            self.actionWindows_Device_Manager.setVisible(False)
+            self.statusbar_btn5.hide()
 
         self.status["init_ok"] = True
 
@@ -1737,20 +1806,44 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
         #     if self.camera.availability() != QMultimedia.Available:
         #         self.device_event_handle("video_disconnect")
 
+    def _popen_available(self, commands):
+        for cmd in commands:
+            exe = cmd.split()[0]
+            if shutil.which(exe):
+                os.popen(cmd)
+                return True
+        return False
+
     # 菜单小工具
     def menu_tools_actions(self, s):
-        if s == 0:
-            os.popen("osk")
-        elif s == 1:
-            os.popen("calc")
-        elif s == 2:
-            os.popen("SnippingTool")
-        elif s == 3:
-            os.popen("notepad")
-        elif s == 4:
-            os.popen("rundll32.exe shell32.dll, Control_RunDLL mmsys.cpl")
-        elif s == 5:
-            os.popen("devmgmt.msc")
+        if IS_WINDOWS:
+            if s == 0:
+                os.popen("osk")
+            elif s == 1:
+                os.popen("calc")
+            elif s == 2:
+                os.popen("SnippingTool")
+            elif s == 3:
+                os.popen("notepad")
+            elif s == 4:
+                os.popen("rundll32.exe shell32.dll, Control_RunDLL mmsys.cpl")
+            elif s == 5:
+                os.popen("devmgmt.msc")
+            return
+        linux_cmds = {
+            1: ["gnome-calculator", "kcalc", "galculator", "qalculate"],
+            2: [
+                "flameshot gui",
+                "spectacle",
+                "gnome-screenshot",
+                "xfce4-screenshooter",
+            ],
+            3: ["gedit", "kate", "mousepad", "xed", "leafpad"],
+        }
+        if not self._popen_available(linux_cmds.get(s, [])):
+            self.statusBar().showMessage(
+                self.tr("No matching tool found on this system")
+            )
 
     # 状态栏显示组合键状态
     def shortcut_status(self, s=[0, 0, 0]):
@@ -1874,6 +1967,11 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
         )
 
     def system_hook_func(self):
+        if not IS_WINDOWS or self.hook_manager is None:
+            self.statusBar().showMessage(
+                self.tr("System hook is not available on this platform")
+            )
+            return
         self.hook_state = not self.hook_state
         self.set_checked(self.actionSystem_hook, self.hook_state)
         self.statusBar().showMessage(
@@ -2546,7 +2644,7 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
         if kb_buffer[2] == 7 and event.key() == self.fullscreen_key:
             self.fullscreen_func()
             return
-        self.keyPress(event.nativeScanCode())
+        self.keyPress(normalize_native_scancode(event.nativeScanCode()))
 
     def keyPress(self, scancode: int):
         # Ctrl+Alt+Shift+V quick paste
@@ -2578,7 +2676,7 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
             return
         if self.ignore_event:
             return
-        self.keyRelease(event.nativeScanCode())
+        self.keyRelease(normalize_native_scancode(event.nativeScanCode()))
 
     def keyRelease(self, scancode: int):
         self.update_kb(scancode, False)
@@ -2601,7 +2699,7 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
             timer = getattr(self, timer_name, None)
             if timer is not None:
                 timer.stop()
-        if getattr(self, "hook_state", False):
+        if getattr(self, "hook_state", False) and self.hook_manager is not None:
             try:
                 self.hook_manager.UnhookKeyboard()
             except Exception:
@@ -2829,14 +2927,14 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
 
     def usb_switch_func(self, s):
         if s == 1:
-            self.usb_switch_dialog.graphics_label.setPixmap(QPixmap(f"{PATH}/data/Images/kvmcard-2c.png"))
+            self.usb_switch_dialog.graphics_label.setPixmap(QPixmap(f"{DATA_DIR}/Images/kvmcard-2c.png"))
         elif s == 2:
-            self.usb_switch_dialog.graphics_label.setPixmap(QPixmap(f"{PATH}/data/Images/kvmcard-discon.png"))
+            self.usb_switch_dialog.graphics_label.setPixmap(QPixmap(f"{DATA_DIR}/Images/kvmcard-discon.png"))
         elif s == 3:
-            self.usb_switch_dialog.graphics_label.setPixmap(QPixmap(f"{PATH}/data/Images/kvmcard-2d.png"))
+            self.usb_switch_dialog.graphics_label.setPixmap(QPixmap(f"{DATA_DIR}/Images/kvmcard-2d.png"))
         else:
 
-            self.usb_switch_dialog.graphics_label.setPixmap(QPixmap(f"{PATH}/data/Images/kvmcard-discon.png"))
+            self.usb_switch_dialog.graphics_label.setPixmap(QPixmap(f"{DATA_DIR}/Images/kvmcard-discon.png"))
 
             # read status
             reply = self._hid_call([0x6F, 0, 3, 0], r_mode=True)
@@ -2855,13 +2953,13 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
                 # reply[5] //EN#
                 if reply[5] == 1:
                     self.usb_switch_dialog.radioButton_float.setChecked(True)
-                    self.usb_switch_dialog.graphics_label.setPixmap(QPixmap(f"{PATH}/data/Images/kvmcard-discon.png"))
+                    self.usb_switch_dialog.graphics_label.setPixmap(QPixmap(f"{DATA_DIR}/Images/kvmcard-discon.png"))
                 elif reply[5] == 0 and reply[4] == 0:
                     self.usb_switch_dialog.radioButton_master.setChecked(True)
-                    self.usb_switch_dialog.graphics_label.setPixmap(QPixmap(f"{PATH}/data/Images/kvmcard-2c.png"))
+                    self.usb_switch_dialog.graphics_label.setPixmap(QPixmap(f"{DATA_DIR}/Images/kvmcard-2c.png"))
                 elif reply[5] == 0 and reply[4] == 1:
                     self.usb_switch_dialog.radioButton_controlled.setChecked(True)
-                    self.usb_switch_dialog.graphics_label.setPixmap(QPixmap(f"{PATH}/data/Images/kvmcard-2d.png"))
+                    self.usb_switch_dialog.graphics_label.setPixmap(QPixmap(f"{DATA_DIR}/Images/kvmcard-2d.png"))
                 else:
                     logger.debug("Function reply unknown error")
                     return
@@ -3058,7 +3156,7 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
         if self._restore_track:
             self._restore_track = False
             self.status["mouse_capture"] = True
-        if self.hook_state:
+        if self.hook_state and self.hook_manager is not None:
             self.pythoncom_timer.start(5)
             self.hook_manager.HookKeyboard()
             self.statusbar_btn5.setPixmap(load_pixmap("hook"))
@@ -3068,7 +3166,7 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
         if self.status["mouse_capture"]:
             self.status["mouse_capture"] = False
             self._restore_track = True
-        if self.hook_state:
+        if self.hook_state and self.hook_manager is not None:
             self.hook_manager.UnhookKeyboard()
             self.pythoncom_timer.stop()
             self.statusbar_btn5.setPixmap(load_pixmap("hook-off"))
@@ -3087,7 +3185,7 @@ def clear_splash():
 
 def main():
     argv = sys.argv
-    if dark_theme:
+    if dark_theme and IS_WINDOWS:
         argv += [
             "-platform",
             "windows:darkmode=2",
@@ -3104,14 +3202,18 @@ def main():
         if translator2.load(os.path.join(PATH, "qtbase_cn.qm")):
             app.installTranslator(translator2)
     myWin = MyMainWindow()
-    qdarktheme.setup_theme(
-        theme="dark" if dark_theme else "light",
-        custom_colors={
-            "[dark]": {
-                "background>base": "#1f2021",
-            }
-        },
-    )
+    theme_name = "dark" if dark_theme else "light"
+    if hasattr(qdarktheme, "setup_theme"):
+        qdarktheme.setup_theme(
+            theme=theme_name,
+            custom_colors={
+                "[dark]": {
+                    "background>base": "#1f2021",
+                }
+            },
+        )
+    else:
+        app.setStyleSheet(qdarktheme.load_stylesheet(theme_name))
     myWin.show()
     QTimer.singleShot(100, myWin.shortcut_status)
     clear_splash()

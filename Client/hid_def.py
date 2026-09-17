@@ -1,4 +1,5 @@
 import ctypes
+import sys
 import threading
 import time
 
@@ -154,17 +155,37 @@ def init_usb(vendor_id, usage_page):
         logger.debug(f"init_usb(vendor_id={vendor_id}, usage_page={usage_page})")
         return 0
     close_usb()
-    device_path = _find_kvm_hid_path(vendor_id, product_id, usage_page)
-    if not device_path:
-        logger.error("Device not found")
-        return 1
     global h
+    if sys.platform.startswith("win"):
+        device_path = _find_kvm_hid_path(vendor_id, product_id, usage_page)
+        if not device_path:
+            logger.error("Device not found")
+            return 1
+        with _hid_lock:
+            try:
+                h.open_path(device_path)
+                h.set_nonblocking(1)
+            except Exception as e:
+                logger.error(f"Failed to open HID device: {e}")
+                return 1
+        return 0
+
+    # Linux hidapi often reports usage_page as 0, so identify the KVM by VID/PID.
+    # Do not hid.enumerate() the whole machine.
     with _hid_lock:
         try:
-            h.open_path(device_path)
+            h.open(vendor_id, product_id)
             h.set_nonblocking(1)
+            logger.info(f"KVM Card Mini opened: {vendor_id:04x}:{product_id:04x}")
         except Exception as e:
-            logger.error(f"Failed to open HID device: {e}")
+            logger.error(
+                f"Failed to open HID device {vendor_id:04x}:{product_id:04x}: {e}"
+            )
+            if sys.platform.startswith("linux"):
+                logger.error(
+                    "On Linux, install Docs/udev/99-kvm-card-mini.rules and "
+                    "ensure your user can access /dev/hidraw*"
+                )
             return 1
     return 0
 

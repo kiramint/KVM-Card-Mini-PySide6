@@ -22,7 +22,6 @@ from flask_cors import CORS
 from flask_httpauth import HTTPBasicAuth
 from flask_sock import Sock
 from loguru import logger
-from PySide6 import *
 from PySide6.QtCore import *
 from PySide6.QtGui import *
 from PySide6.QtMultimedia import *
