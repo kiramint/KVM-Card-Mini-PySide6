@@ -1,8 +1,10 @@
 import os
+import queue
 import random
 import re
 import sys
 import tempfile
+import threading
 import time
 from typing import Tuple
 
@@ -256,18 +258,57 @@ class MyUsbSwitchDialog(QDialog, usb_switch.Ui_Dialog):
         self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
 
 
-class HidThread(QThread):
-    _hid_signal = Signal(list)
-    _event_signal = Signal(str)
+class HidWorker(QObject):
+    event_signal = Signal(str)
+    _wake = Signal()
 
     def __init__(self, parent=None):
-        super(HidThread, self).__init__(parent)
-        self._hid_signal.connect(self.hid_report)
+        super(HidWorker, self).__init__(parent)
+        self._jobs = queue.Queue()
+        self._wake.connect(self.pump, Qt.QueuedConnection)
 
-    def hid_report(self, buf):
-        hidinfo = hid_def.hid_report(buf)
+    def submit(self, fn, wait=False, timeout=5.0):
+        thread = self.thread()
+        if thread is None or QThread.currentThread() is thread:
+            return fn()
+        done = threading.Event()
+        box = [None]
+        err = [None]
+
+        def job():
+            try:
+                box[0] = fn()
+            except Exception as e:
+                err[0] = e
+            finally:
+                done.set()
+
+        self._jobs.put(job)
+        self._wake.emit()
+        if not wait:
+            return None
+        if not done.wait(timeout):
+            logger.error("HID command timed out")
+            return 1
+        if err[0] is not None:
+            logger.error(f"HID command failed: {err[0]}")
+            return 1
+        return box[0]
+
+    @Slot()
+    def pump(self):
+        while True:
+            try:
+                job = self._jobs.get_nowait()
+            except queue.Empty:
+                break
+            job()
+
+    @Slot(list)
+    def write(self, buf):
+        hidinfo = hid_def.hid_report(list(buf))
         if hidinfo == 1 or hidinfo == 4:
-            self._event_signal.emit("hid_error")
+            self.event_signal.emit("hid_error")
 
 
 class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
@@ -283,7 +324,14 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
         self.camera = None
         self.camera_opened = False
         self.camera_info = None
+        self.capture_session = None
+        self.video_sink = None
+        self.image_capture = None
+        self.video_record = None
+        self.audio_input = None
+        self.audio_output = None
         self.audio_opened = False
+        self.video_recording = False
         self.device_connected = False
         self.fpsc = FPSCounter()
 
@@ -680,8 +728,6 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
         self.check_device_timer.timeout.connect(self.check_device_status)
         self.check_device_timer.start(1000)
 
-        self.reset_keymouse(4)
-
         # self.setMouseTracking(True)
 
         self.mouse_scroll_timer = QTimer()
@@ -700,10 +746,14 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
         self._mouse_report_timer = QTimer()
         self._mouse_report_timer.timeout.connect(self.mouse_report_timeout)
         self._mouse_report_timer.start(self.mouse_report_interval)
-        self._hid_thread = HidThread()
-        self._hid_signal = self._hid_thread._hid_signal
-        self._hid_thread._event_signal.connect(self.device_event_handle)
+        self._closing = False
+        self._hid_thread = QThread(self)
+        self._hid_worker = HidWorker()
+        self._hid_worker.moveToThread(self._hid_thread)
+        self._hid_signal.connect(self._hid_worker.write, Qt.QueuedConnection)
+        self._hid_worker.event_signal.connect(self.device_event_handle)
         self._hid_thread.start()
+        self.reset_keymouse(4)
 
         self.hook_state = False
         self.hook_manager = pyHook.HookManager()
@@ -985,27 +1035,15 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
                 self.device_setup_dialog.comboBox_3.addItem(fmt_str)
 
     def camera_error_occurred(self, error, string):
+        if getattr(self, "_closing", False):
+            return
+        dev_name = (
+            self.camera_info.description() if self.camera_info is not None else "Unknown"
+        )
         error_s = (
-                f"Device: {self.camera_info.description()}\nReturned: {error}\n\n"
+                f"Device: {dev_name}\nReturned: {error}\n\n"
                 + self.tr("Device disconnected")
         )
-        self.crash_devices.append(
-            (
-                self.camera,
-                self.capture_session,
-                self.image_capture,
-                self.video_record,
-            )
-        )
-        if self.audio_opened:
-            self.crash_devices.append(
-                (
-                    self.audio_input,
-                    self.audio_output,
-                    self.audio_in_device,
-                    self.audio_out_device,
-                )
-            )
         self.statusbar_icon1.setPixmap(load_pixmap("video-off"))
         self.camera_opened = False
         self.camera_info = None
@@ -1014,6 +1052,7 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
         self.videoWidget.hide()
         self.disconnect_label.show()
         self.setWindowTitle("USB KVM Client")
+        QTimer.singleShot(0, self._release_camera)
         self.check_device_status()
         QMessageBox.critical(self, self.tr("Device Error"), error_s)
 
@@ -1021,6 +1060,94 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
         self.videoWidget.videoSink().setVideoFrame(frame)
         self.videoWidget.update()
         self.videoWidget.repaint()
+
+    def _disconnect_quietly(self, obj, signal_name, slot):
+        if obj is None:
+            return
+        try:
+            getattr(obj, signal_name).disconnect(slot)
+        except Exception:
+            pass
+
+    def _release_camera(self):
+        self._disconnect_quietly(
+            getattr(self, "video_sink", None), "videoFrameChanged", self.frame_changed
+        )
+        self._disconnect_quietly(
+            getattr(self, "camera", None), "errorOccurred", self.camera_error_occurred
+        )
+        if getattr(self, "video_record", None) is not None:
+            try:
+                if (
+                    self.video_record.recorderState()
+                    == QMediaRecorder.RecorderState.RecordingState
+                ):
+                    self.video_record.stop()
+            except Exception:
+                pass
+            self.video_recording = False
+        if getattr(self, "capture_session", None) is not None:
+            try:
+                self.capture_session.setCamera(None)
+                self.capture_session.setVideoSink(None)
+                self.capture_session.setAudioInput(None)
+                self.capture_session.setAudioOutput(None)
+                self.capture_session.setRecorder(None)
+                self.capture_session.setImageCapture(None)
+            except Exception:
+                pass
+        if getattr(self, "camera", None) is not None:
+            try:
+                self.camera.stop()
+            except Exception:
+                pass
+            try:
+                self.camera.setActive(False)
+            except Exception:
+                pass
+        for attr in (
+            "audio_input",
+            "audio_output",
+            "video_record",
+            "image_capture",
+            "capture_session",
+            "video_sink",
+            "camera",
+        ):
+            obj = getattr(self, attr, None)
+            if obj is not None:
+                try:
+                    obj.deleteLater()
+                except Exception:
+                    pass
+                setattr(self, attr, None)
+        if getattr(self, "audio_opened", False):
+            self.audio_in_device = None
+            self.audio_out_device = None
+        self.audio_opened = False
+        self.camera_opened = False
+        leaked = getattr(self, "crash_devices", None) or []
+        self.crash_devices = []
+        for group in leaked:
+            if not isinstance(group, tuple):
+                group = (group,)
+            for obj in group:
+                if obj is None:
+                    continue
+                try:
+                    if hasattr(obj, "stop"):
+                        obj.stop()
+                except Exception:
+                    pass
+                try:
+                    if hasattr(obj, "setActive"):
+                        obj.setActive(False)
+                except Exception:
+                    pass
+                try:
+                    obj.deleteLater()
+                except Exception:
+                    pass
 
     # 初始化指定配置视频设备
     def setup_device(self):
@@ -1049,6 +1176,7 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
             self.video_alert(
                 self.tr("Unsupported combination of resolution and format")
             )
+            self._release_camera()
             return False
 
         if self.device_setup_dialog.checkBoxAudio.isChecked():
@@ -1076,6 +1204,7 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
                     out_device = None
             if in_device is None or out_device is None:
                 self.video_alert(self.tr("Audio device not found"))
+                self._release_camera()
                 return False
             self.audio_in_device = in_device
             self.audio_out_device = out_device
@@ -1084,6 +1213,7 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
         self.camera.start()
         if not self.camera.isActive():
             self.video_alert(self.tr("Video device connect failed"))
+            self._release_camera()
             return False
 
         self.capture_session = QMediaCaptureSession()
@@ -1194,6 +1324,8 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
             )
             return False
         if state:
+            if self.camera is not None or self.camera_opened:
+                self._release_camera()
             if not self.setup_device():
                 return
             if not self.status["fullscreen"]:
@@ -1211,20 +1343,9 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
                 self.mouse_report_interval = 1000 / fps
                 self._mouse_report_timer.setInterval(self.mouse_report_interval)
         else:
-            if not self.camera_opened:
+            if not self.camera_opened and self.camera is None:
                 return
-            self.camera.setActive(False)
-            self.camera.deleteLater()
-            self.capture_session.deleteLater()
-            self.camera.deleteLater()
-            self.image_capture.deleteLater()
-            self.video_record.deleteLater()
-            if self.audio_opened:
-                self.audio_input.deleteLater()
-                self.audio_output.deleteLater()
-                del self.audio_in_device
-                del self.audio_out_device
-                self.audio_opened = False
+            self._release_camera()
             self.device_event_handle("video_close")
             self.takeCentralWidget()
             self.setCentralWidget(self.disconnect_label)
@@ -1303,12 +1424,25 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
     def window_minimized(self):
         self.showMinimized()
 
+    def _hid_call(self, buf, r_mode=False, wait=False):
+        buf = list(buf)
+        worker = getattr(self, "_hid_worker", None)
+        if worker is None:
+            return hid_def.hid_report(buf, r_mode)
+        if wait or r_mode:
+            timeout = 8.0 if r_mode else 5.0
+            return worker.submit(
+                lambda: hid_def.hid_report(buf, r_mode), wait=True, timeout=timeout
+            )
+        self._hid_signal.emit(buf)
+        return 0
+
     # 重置键盘鼠标
     def reset_keymouse(self, s):
         if s == 1:  # keyboard
             for i in range(2, len(kb_buffer)):
                 kb_buffer[i] = 0
-            hidinfo = hid_def.hid_report(kb_buffer)
+            hidinfo = self._hid_call(kb_buffer, wait=True)
             if hidinfo == 1 or hidinfo == 4:
                 self.device_event_handle("hid_error")
             elif hidinfo == 0:
@@ -1317,7 +1451,7 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
         elif s == 2:  # MCU
             self.set_ws2812b(255, 0, 0)
             self.qt_sleep(100)
-            hidinfo = hid_def.hid_report([4, 0])
+            hidinfo = self._hid_call([4, 0], wait=True)
             if hidinfo == 1 or hidinfo == 4:
                 self.device_event_handle("hid_error")
             elif hidinfo == 0:
@@ -1329,15 +1463,23 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
             for i in range(2, len(mouse_buffer)):
                 mouse_buffer[i] = 0
             for i in range(2, len(mouse_buffer_rel)):
-                mouse_buffer[i] = 0
-            hidinfo = hid_def.hid_report(mouse_buffer)
-            hidinfo = hid_def.hid_report(mouse_buffer_rel)
+                mouse_buffer_rel[i] = 0
+            hidinfo = self._hid_call(mouse_buffer, wait=True)
+            hidinfo = self._hid_call(mouse_buffer_rel, wait=True)
             if hidinfo == 1 or hidinfo == 4:
                 self.device_event_handle("hid_error")
             elif hidinfo == 0:
                 self.device_event_handle("hid_ok")
         elif s == 4:  # hid
-            hid_code = hid_def.init_usb(hid_def.vendor_id, hid_def.usage_page)
+            worker = getattr(self, "_hid_worker", None)
+            if worker is None:
+                hid_code = hid_def.init_usb(hid_def.vendor_id, hid_def.usage_page)
+            else:
+                hid_code = worker.submit(
+                    lambda: hid_def.init_usb(hid_def.vendor_id, hid_def.usage_page),
+                    wait=True,
+                    timeout=8.0,
+                )
             if hid_code == 0:
                 self.device_event_handle("hid_init_ok")
                 if self.status["mouse_capture"]:
@@ -1584,7 +1726,12 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
     # 检查连接状态
     def check_device_status(self):
         if self.device_connected:
-            if not hid_def.check_connection():
+            worker = getattr(self, "_hid_worker", None)
+            if worker is None:
+                ok = hid_def.check_connection()
+            else:
+                ok = worker.submit(hid_def.check_connection, wait=True, timeout=2.0)
+            if not ok:
                 self.device_event_handle("device_disconnect")
         # if self.camera_opened:
         #     if self.camera.availability() != QMultimedia.Available:
@@ -1631,7 +1778,7 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
             self.statusbar_lable4.setStyleSheet("color: grey")
 
     def update_indicatorLight(self) -> None:
-        reply = hid_def.hid_report([3, 0], True)
+        reply = self._hid_call([3, 0], r_mode=True)
         if reply == 1 or reply == 2 or reply == 3 or reply == 4:
             self.device_event_handle("hid_error")
             self.indicator_timer.stop()
@@ -2177,9 +2324,7 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
         self.mouse_action_timer.stop()
 
     def hid_report(self, buf: list[int]):
-        hidinfo = hid_def.hid_report(buf)
-        if hidinfo == 1 or hidinfo == 4:
-            self.device_event_handle("hid_error")
+        self._hid_call(buf)
 
     # 鼠标移动事件
     _last_mouse_pos = None
@@ -2440,8 +2585,42 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
         self.shortcut_status(kb_buffer)
 
     def closeEvent(self, event):
-        # os._exit(0)
-        pass
+        if getattr(self, "_closing", False):
+            event.accept()
+            return
+        self._closing = True
+        self.ignore_event = True
+        for timer_name in (
+            "check_device_timer",
+            "indicator_timer",
+            "_mouse_report_timer",
+            "mouse_scroll_timer",
+            "mouse_action_timer",
+            "pythoncom_timer",
+        ):
+            timer = getattr(self, timer_name, None)
+            if timer is not None:
+                timer.stop()
+        if getattr(self, "hook_state", False):
+            try:
+                self.hook_manager.UnhookKeyboard()
+            except Exception:
+                pass
+            self.hook_state = False
+        try:
+            if getattr(self, "server", None) is not None and self.server.running:
+                self.server.stop_server()
+        except Exception:
+            pass
+        self._release_camera()
+        worker = getattr(self, "_hid_worker", None)
+        thread = getattr(self, "_hid_thread", None)
+        if worker is not None:
+            worker.submit(hid_def.close_usb, wait=True, timeout=2.0)
+        if thread is not None and thread.isRunning():
+            thread.quit()
+            thread.wait(2000)
+        event.accept()
 
     @Slot()
     def on_btnServerSwitch_clicked(self):
@@ -2660,7 +2839,7 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
             self.usb_switch_dialog.graphics_label.setPixmap(QPixmap(f"{PATH}/data/Images/kvmcard-discon.png"))
 
             # read status
-            reply = hid_def.hid_report([0x6F, 0, 3, 0], True)
+            reply = self._hid_call([0x6F, 0, 3, 0], r_mode=True)
             if reply == 1 or reply == 2 or reply == 4:
                 self.device_event_handle("hid_error")
                 return
@@ -2709,7 +2888,7 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
                 else:
                     # logger.debug("usb_switch unknown error")
                     return
-                hidinfo = hid_def.hid_report(payload)
+                hidinfo = self._hid_call(payload, wait=True)
                 if hidinfo == 1 or hidinfo == 4:
                     self.device_event_handle("hid_error")
 
@@ -2730,7 +2909,7 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
         progress.show()
 
         # read usb switch status
-        reply = hid_def.hid_report([0x6F, 0, 3, 0], True)
+        reply = self._hid_call([0x6F, 0, 3, 0], r_mode=True)
         if reply == 1 or reply == 2 or reply == 4:
             self.device_event_handle("hid_error")
             progress.close()
@@ -2768,7 +2947,7 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
 
         # Send command to disconnect USB device
         payload = [0x6F, 0, 0, 0]
-        hidinfo = hid_def.hid_report(payload)
+        hidinfo = self._hid_call(payload, wait=True)
         if hidinfo == 1 or hidinfo == 4:
             self.device_event_handle("hid_error")
         # progress.setLabelText("Disconnect the USB port connection")
@@ -2787,7 +2966,7 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
         else:
             # logger.debug("usb_switch unknown error")
             return
-        hidinfo = hid_def.hid_report(payload)
+        hidinfo = self._hid_call(payload, wait=True)
         if hidinfo == 1 or hidinfo == 4:
             self.device_event_handle("hid_error")
         # progress.setLabelText("Switch the USB port...  ")
