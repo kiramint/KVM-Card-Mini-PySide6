@@ -31,7 +31,7 @@ jobs:
             build: pwsh -File compiler-windows.ps1
           - os: windows-11-arm
             target: windows-arm64
-            python: "3.11"
+            python: "3.11-aarch64"
             msvc_arch: arm64
             out_dir: build_windows
             build: pwsh -File compiler-windows.ps1
@@ -76,6 +76,7 @@ jobs:
         working-directory: Client
         env:
           PYTHON_VERSION: ${{ matrix.python }}
+          UV_PYTHON: ${{ matrix.python }}
           INSTALL_DEPS: ${{ runner.os == 'Linux' && '1' || '0' }}
         run: ${{ matrix.build }}
 

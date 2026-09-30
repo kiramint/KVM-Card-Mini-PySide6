@@ -34,6 +34,12 @@ try {
     # Windows PowerShell 5.x without RuntimeInformation
 }
 $IsWinArm64 = $ArchName -match "Arm64"
+# uv on Windows ARM64 defaults to emulated x86_64 Python. Force native ARM64
+# so wheels (Nuitka, PySide6) match the interpreter.
+if ($IsWinArm64 -and $PythonVersion -notmatch "aarch64|arm64") {
+    $PythonVersion = "$PythonVersion-aarch64"
+}
+$env:UV_PYTHON = $PythonVersion
 $OutDir = "build_windows"
 $Jobs = [Environment]::ProcessorCount
 if ($Jobs -lt 1) { $Jobs = 4 }
@@ -42,7 +48,13 @@ Write-Host "Host architecture: $ArchName"
 Write-Host "Packaging Python: $PythonVersion"
 
 uv python install $PythonVersion
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+uv run --python $PythonVersion python -c "import platform, sys; print(sys.version); print('machine=', platform.machine())"
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
 uv sync --group packaging --python $PythonVersion
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 if (Test-Path -LiteralPath $OutDir) {
     cmd /c "rmdir /s /q `"$OutDir`""
