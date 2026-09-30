@@ -57,7 +57,8 @@ if [[ "$INSTALL_DEPS" == "1" ]]; then
     libgstreamer1.0-0 \
     libgstreamer-plugins-base1.0-0 \
     file \
-    desktop-file-utils
+    desktop-file-utils \
+    libfuse2
 fi
 
 if ! command -v gcc >/dev/null 2>&1 || ! command -v g++ >/dev/null 2>&1; then
@@ -83,6 +84,9 @@ fi
 
 uv python install "$PYTHON_VERSION"
 uv sync --group packaging --python "$PYTHON_VERSION"
+
+# appimagetool is itself an AppImage and dlopens libfuse.so.2 (libfuse2).
+export APPIMAGE_EXTRACT_AND_RUN=1
 
 JOBS="$(nproc 2>/dev/null || echo 4)"
 OUT_DIR=build_linux
