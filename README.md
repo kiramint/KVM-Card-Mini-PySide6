@@ -44,7 +44,18 @@ uv sync
 uv run python Mini-KVM.py
 ```
 
-macOS 采集卡需要 `.app` 才能弹出相机权限，打包：
+Nuitka 独立包（`uv` 的 `packaging` 组）：
+
+```bash
+cd Client
+./compiler-macos.sh                 # Apple Silicon → build_macos/*.app
+INSTALL_DEPS=1 ./compiler-linux.sh  # amd64/arm64，与本机架构一致 → build_linux/*.dist
+pwsh -File compiler-windows.ps1     # amd64/arm64，与本机架构一致 → build_windows/*.dist
+```
+
+Windows 打包用 Python 3.11（amd64 才能装上 `pyWinhook` 轮子）；Linux / macOS 用 3.12。可用环境变量 `PYTHON_VERSION` 覆盖。Windows ARM64 没有 System hook。
+
+macOS 采集卡需要 `.app` 才能弹出相机权限：
 
 ```bash
 cd Client
@@ -52,7 +63,17 @@ cd Client
 open build_macos/Mini-KVM.app
 ```
 
-打包结果在 `Client/build_macos/Mini-KVM.app`（显示名 KVM Card Mini，bundle id `dev.kiramint.kvm-card-mini`）。配置和错误日志在 `~/Library/Application Support/KVM Card Mini/`。窗口内鼠标跟踪需要这套 `.app` 里的 overlay，不要用完全透明遮罩。
+macOS 包显示名 KVM Card Mini，bundle id `dev.kiramint.kvm-card-mini`。配置和错误日志在 `~/Library/Application Support/KVM Card Mini/`。窗口内鼠标跟踪需要这套 `.app` 里的 overlay，不要用完全透明遮罩。
+
+推送仓库会跑 [`.github/workflows/build.yml`](./.github/workflows/build.yml)，产物：
+
+| Artifact | Runner |
+|----------|--------|
+| `KVM-Card-Mini-windows-amd64` | `windows-latest` |
+| `KVM-Card-Mini-windows-arm64` | `windows-11-arm` |
+| `KVM-Card-Mini-linux-amd64` | `ubuntu-24.04` |
+| `KVM-Card-Mini-linux-arm64` | `ubuntu-24.04-arm` |
+| `KVM-Card-Mini-macos-arm64` | `macos-15` |
 
 给 Agent 的仓库说明见 [AGENTS.md](./AGENTS.md)。
 

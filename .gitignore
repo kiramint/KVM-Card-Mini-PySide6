@@ -58,6 +58,8 @@ obj/
 build/
 build_console/
 build_macos/
+build_windows/
+build_linux/
 .idea/
 .vscode/
 *.mk

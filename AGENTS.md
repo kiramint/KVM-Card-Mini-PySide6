@@ -20,8 +20,12 @@ Notes for agents working in this repository.
 | `Client/hid_def.py` | HID open: Windows cfgmgr32 paths; Linux/macOS `hid.open(vid, pid)`. |
 | `Client/ui/` | Qt Designer `.ui` plus generated `*_ui.py`. Edit both. |
 | `Client/Data/` | Keyboard maps and images. Bundled as `data`. |
+| `Client/compiler-macos.sh` | Nuitka macOS .app (Apple Silicon). |
+| `Client/compiler-linux.sh` | Nuitka Linux standalone (host arch). |
+| `Client/compiler-windows.ps1` | Nuitka Windows standalone (host arch). `compiler.ps1` forwards here. |
 | `Docs/linux.md`, `Docs/macos.md` | Platform runbooks. |
 | `Docs/udev/99-kvm-card-mini.rules` | Linux hidraw access. |
+| `.github/workflows/build.yml` | Multi-arch client builds on push. |
 
 ## Run
 
@@ -33,17 +37,20 @@ uv sync
 uv run python Mini-KVM.py
 ```
 
-Windows-only packages (`pyWinhook`, `pywin32`) use `sys_platform == "win32"`.
+Windows-only packages: `pywin32` is `sys_platform == "win32"`; `pyWinhook` is also `platform_machine == "AMD64"` (wheels exist for cp310/cp311 win_amd64 only). On Windows ARM64 the System hook menu is hidden.
 
-macOS camera TCC is granted to the `.app`, not Terminal/Python:
+Packaging is Nuitka standalone via `uv sync --group packaging`. Scripts pin Python 3.11 on Windows (pyWinhook wheels) and 3.12 on Linux/macOS (`PYTHON_VERSION` overrides).
 
 ```bash
 cd Client
-./compiler-macos.sh
-open build_macos/Mini-KVM.app
+./compiler-macos.sh          # build_macos/*.app  (Apple Silicon)
+./compiler-linux.sh          # build_linux/*.dist (INSTALL_DEPS=1 on Ubuntu)
+pwsh -File compiler-windows.ps1
 ```
 
-Packaging group: `uv sync --group packaging` (Nuitka 4.2). Output bundle id `dev.kiramint.kvm-card-mini`. `QCameraPermission` / `QMicrophonePermission` are in `PySide6.QtCore`.
+macOS camera TCC is granted to the `.app`, not Terminal/Python. Bundle id `dev.kiramint.kvm-card-mini`. `QCameraPermission` / `QMicrophonePermission` are in `PySide6.QtCore`.
+
+GitHub Actions: `.github/workflows/build.yml` on push / `workflow_dispatch`. Native runners: `windows-latest`, `windows-11-arm`, `ubuntu-24.04`, `ubuntu-24.04-arm`, `macos-15`. Artifacts: `KVM-Card-Mini-{windows-amd64,windows-arm64,linux-amd64,linux-arm64,macos-arm64}`.
 
 ## Conventions
 

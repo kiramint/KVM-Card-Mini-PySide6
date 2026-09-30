@@ -40,11 +40,24 @@ uv sync
 uv run python Mini-KVM.py
 ```
 
-Windows 专用包（`pyWinhook` / `pywin32`）带有 `sys_platform == "win32"` 标记，Linux 上不会安装。
+Windows 专用包（`pyWinhook` / `pywin32`）带有平台标记，Linux 上不会安装。
+
+## 打包（Nuitka）
+
+本机架构一份 standalone 目录（amd64 或 arm64）：
+
+```bash
+cd Client
+chmod +x compiler-linux.sh
+INSTALL_DEPS=1 ./compiler-linux.sh
+```
+
+结果在 `Client/build_linux/Mini-KVM.dist/`，入口是 `KVM-Card-Mini`。打包 Python 默认 3.12。`INSTALL_DEPS=1` 会 `apt` 安装 gcc、patchelf、libhidapi、GStreamer 和 xcb 相关包。跑起来仍需要系统 hidapi；采集卡预览还需要 GStreamer 插件（与上面「系统依赖」相同）。
+
+GitHub Actions 会在 `ubuntu-24.04` 和 `ubuntu-24.04-arm` 上各打一份。
 
 ## 使用注意
 
 - 键盘：焦点在客户端窗口内即可把按键送到被控机。
 - 鼠标：绝对模式按窗口坐标映射。右 Ctrl 或菜单「释放鼠标」结束捕获。
 - System hook、屏幕键盘、Windows 音频/设备管理器在 Linux 上隐藏。
-- 打包（Nuitka）本期不做。

@@ -19,22 +19,32 @@ if [[ ! -f icons/icon.icns ]]; then
   exit 1
 fi
 
+PYTHON_VERSION="${PYTHON_VERSION:-3.12}"
+
 DATA_SRC=Data
 if [[ ! -d "$DATA_SRC" && -d data ]]; then
   DATA_SRC=data
 fi
+if [[ ! -d "$DATA_SRC" ]]; then
+  echo "Missing Data/ (or data/) directory" >&2
+  exit 1
+fi
 
-uv sync --group packaging
+uv python install "$PYTHON_VERSION"
+uv sync --group packaging --python "$PYTHON_VERSION"
 
 JOBS="$(sysctl -n hw.ncpu 2>/dev/null || echo 4)"
 OUT_DIR=build_macos
 APP_NAME="KVM Card Mini"
 BUNDLE_ID="dev.kiramint.kvm-card-mini"
 
-rm -rf "$OUT_DIR"
+if [[ -d "$OUT_DIR" ]]; then
+  chmod -R u+w "$OUT_DIR" 2>/dev/null || true
+  rm -rf "$OUT_DIR"
+fi
 mkdir -p "$OUT_DIR"
 
-uv run --group packaging python -m nuitka \
+uv run --python "$PYTHON_VERSION" --group packaging python -m nuitka \
   --standalone \
   --macos-create-app-bundle \
   --macos-app-mode=gui \
@@ -95,6 +105,8 @@ fi
 
 # Ad-hoc sign so Apple Silicon will actually launch the bundle.
 codesign --force --deep --sign - "$APP_PATH"
+
+printf '%s' "$APP_PATH" >"$OUT_DIR/.build-output"
 
 echo
 echo "Built: $APP_PATH"

@@ -1,0 +1,116 @@
+# Native Nuitka standalone builds. Invokes Client/compiler-*.{ps1,sh}.
+# Targets: Windows amd64/arm64, Linux amd64/arm64, macOS arm64 (Apple Silicon).
+name: Build
+
+on:
+  push:
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  client:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: windows-amd64
+            python: "3.11"
+            msvc_arch: amd64
+            out_dir: build_windows
+            build: pwsh -File compiler-windows.ps1
+          - os: windows-11-arm
+            target: windows-arm64
+            python: "3.11"
+            msvc_arch: arm64
+            out_dir: build_windows
+            build: pwsh -File compiler-windows.ps1
+          - os: ubuntu-24.04
+            target: linux-amd64
+            python: "3.12"
+            msvc_arch: ""
+            out_dir: build_linux
+            build: bash compiler-linux.sh
+          - os: ubuntu-24.04-arm
+            target: linux-arm64
+            python: "3.12"
+            msvc_arch: ""
+            out_dir: build_linux
+            build: bash compiler-linux.sh
+          - os: macos-15
+            target: macos-arm64
+            python: "3.12"
+            msvc_arch: ""
+            out_dir: build_macos
+            build: bash compiler-macos.sh
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v10
+        with:
+          python-version: ${{ matrix.python }}
+          enable-cache: true
+          cache-dependency-glob: Client/uv.lock
+          cache-suffix: ${{ matrix.target }}
+
+      - name: Enable MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.msvc_arch }}
+
+      - name: Build
+        working-directory: Client
+        env:
+          PYTHON_VERSION: ${{ matrix.python }}
+          INSTALL_DEPS: ${{ runner.os == 'Linux' && '1' || '0' }}
+        run: ${{ matrix.build }}
+
+      - name: Stage artifact
+        shell: bash
+        working-directory: Client
+        run: |
+          set -euo pipefail
+          marker="${{ matrix.out_dir }}/.build-output"
+          if [[ ! -f "$marker" ]]; then
+            echo "Missing $marker" >&2
+            ls -la "${{ matrix.out_dir }}" >&2 || true
+            exit 1
+          fi
+          out="$(tr -d '\r' < "$marker")"
+          if [[ ! -e "$out" ]]; then
+            echo "Build output does not exist: $out" >&2
+            exit 1
+          fi
+          mkdir -p ../artifact
+          case "${{ matrix.target }}" in
+            macos-*)
+              cp -a "$out" ../artifact/
+              ;;
+            *)
+              mkdir -p ../artifact/KVM-Card-Mini
+              cp -a "$out"/. ../artifact/KVM-Card-Mini/
+              ;;
+          esac
+          ls -la ../artifact
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: KVM-Card-Mini-${{ matrix.target }}
+          path: artifact/
+          if-no-files-found: error
+          retention-days: 14

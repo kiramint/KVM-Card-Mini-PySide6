@@ -30,7 +30,7 @@ chmod +x compiler-macos.sh
 open build_macos/Mini-KVM.app
 ```
 
-包内 `Info.plist` 带有 `NSCameraUsageDescription` 和 `NSMicrophoneUsageDescription`。首次连接采集卡时允许相机（以及可选的麦克风）。若曾经拒绝，到 **系统设置 → 隐私与安全性 → 相机** 里打开 **KVM Card Mini**。
+包内 `Info.plist` 带有 `NSCameraUsageDescription` 和 `NSMicrophoneUsageDescription`。首次连接采集卡时允许相机（以及可选的麦克风）。若曾经拒绝，到 **系统设置 → 隐私与安全性 → 相机** 里打开 **KVM Card Mini**。打包 Python 默认 3.12。GitHub Actions 在 `macos-15`（Apple Silicon）上构建，产物名 `KVM-Card-Mini-macos-arm64`。
 
 配置和错误日志在 `~/Library/Application Support/KVM Card Mini/`。客户端内置 Web KVM 默认端口是 **5001**（AirPlay Receiver 占用 5000）。
 

@@ -46,7 +46,11 @@ from ui import (
 
 if IS_WINDOWS:
     import pythoncom
-    import pyWinhook as pyHook
+
+    try:
+        import pyWinhook as pyHook
+    except ImportError:
+        pyHook = None
 
 """
 qdarktheme import after QT
@@ -824,7 +828,7 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
         self.pythoncom_timer = None
         self.hook_pressed_keys = []
         self._keyboard_grabbed = False
-        if IS_WINDOWS:
+        if IS_WINDOWS and pyHook is not None:
             self.hook_manager = pyHook.HookManager()
             self.hook_manager.KeyDown = self.hook_keyboard_down_event
             self.hook_manager.KeyUp = self.hook_keyboard_up_event
@@ -832,12 +836,13 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
             self.pythoncom_timer.timeout.connect(
                 lambda: pythoncom.PumpWaitingMessages()
             )
-        else:
+        if self.hook_manager is None:
             self.actionSystem_hook.setVisible(False)
+            self.statusbar_btn5.hide()
+        if not IS_WINDOWS:
             self.actionOn_screen_Keyboard.setVisible(False)
             self.actionWindows_Audio_Setting.setVisible(False)
             self.actionWindows_Device_Manager.setVisible(False)
-            self.statusbar_btn5.hide()
             self.statusbar_btn1.setToolTip(
                 self.tr("System keys (Win/Alt+Tab) cannot be captured; use Keyboard → System shortcuts")
             )
