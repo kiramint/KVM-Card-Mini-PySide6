@@ -21,8 +21,8 @@ Notes for agents working in this repository.
 | `Client/ui/` | Qt Designer `.ui` plus generated `*_ui.py`. Edit both. |
 | `Client/Data/` | Keyboard maps and images. Bundled as `data`. |
 | `Client/compiler-macos.sh` | Nuitka macOS .app (Apple Silicon). |
-| `Client/compiler-linux.sh` | Nuitka Linux standalone (host arch). |
-| `Client/compiler-windows.ps1` | Nuitka Windows standalone (host arch). `compiler.ps1` forwards here. |
+| `Client/compiler-linux.sh` | Nuitka Linux AppImage (host arch). |
+| `Client/compiler-windows.ps1` | Nuitka Windows amd64 onefile. `compiler.ps1` forwards here. |
 | `Docs/linux.md`, `Docs/macos.md` | Platform runbooks. |
 | `Docs/udev/99-kvm-card-mini.rules` | Linux hidraw access. |
 | `.github/workflows/build.yml` | Multi-arch client builds on push. |
@@ -37,20 +37,20 @@ uv sync
 uv run python Mini-KVM.py
 ```
 
-Windows-only packages: `pywin32` is `sys_platform == "win32"`; `pyWinhook` is also `platform_machine == "AMD64"` (wheels exist for cp310/cp311 win_amd64 only). On Windows ARM64 the System hook menu is hidden.
+Windows-only packages: `pywin32` is `sys_platform == "win32"`; `pyWinhook` is also `platform_machine == "AMD64"` (wheels exist for cp310/cp311 win_amd64 only).
 
-Packaging is Nuitka standalone via `uv sync --group packaging`. Scripts pin Python 3.11 on Windows (pyWinhook wheels) and 3.12 on Linux/macOS (`PYTHON_VERSION` overrides).
+Packaging via `uv sync --group packaging`. Scripts pin Python 3.11 on Windows (pyWinhook wheels) and 3.12 on Linux/macOS (`PYTHON_VERSION` overrides).
 
 ```bash
 cd Client
-./compiler-macos.sh          # build_macos/*.app  (Apple Silicon)
-./compiler-linux.sh          # build_linux/*.dist (INSTALL_DEPS=1 on Ubuntu)
-pwsh -File compiler-windows.ps1
+./compiler-macos.sh          # build_macos/*.app
+./compiler-linux.sh          # build_linux/*.AppImage (INSTALL_DEPS=1 on Ubuntu)
+pwsh -File compiler-windows.ps1   # build_windows/KVM-Card-Mini.exe (amd64 onefile)
 ```
 
-macOS camera TCC is granted to the `.app`, not Terminal/Python. Bundle id `dev.kiramint.kvm-card-mini`. `QCameraPermission` / `QMicrophonePermission` are in `PySide6.QtCore`.
+macOS camera TCC is granted to the `.app`, not Terminal/Python. Bundle id `dev.kiramint.kvm-card-mini`. `QCameraPermission` / `QMicrophonePermission` are in `PySide6.QtCore`. Windows onefile uses `booting.png` as splash; Mini-KVM.py dismisses it after importing `main`.
 
-GitHub Actions: `.github/workflows/build.yml` on push / `workflow_dispatch`. Native runners: `windows-latest`, `windows-11-arm`, `ubuntu-24.04`, `ubuntu-24.04-arm`, `macos-15`. Artifacts: `KVM-Card-Mini-{windows-amd64,windows-arm64,linux-amd64,linux-arm64,macos-arm64}`.
+GitHub Actions: `.github/workflows/build.yml` on push / `workflow_dispatch`. Runners: `windows-latest`, `ubuntu-24.04`, `ubuntu-24.04-arm`, `macos-15`. Artifacts: `KVM-Card-Mini-{windows-amd64,linux-amd64,linux-arm64,macos-arm64}`.
 
 ## Conventions
 

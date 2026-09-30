@@ -1,6 +1,7 @@
 import datetime
 import os
 import sys
+import tempfile
 import traceback
 
 
@@ -25,9 +26,24 @@ def error_log(msg):
         f.write(f"{msg}\n")
 
 
+def _dismiss_onefile_splash():
+    parent = os.environ.get("NUITKA_ONEFILE_PARENT")
+    if not parent:
+        return
+    splash = os.path.join(
+        tempfile.gettempdir(),
+        "onefile_%d_splash_feedback.tmp" % int(parent),
+    )
+    try:
+        os.unlink(splash)
+    except OSError:
+        pass
+
+
 try:
     from main import main
 
+    _dismiss_onefile_splash()
     main()
 except Exception:
     error_log(traceback.format_exc())

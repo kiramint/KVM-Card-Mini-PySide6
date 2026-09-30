@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build a Nuitka standalone Linux client (amd64 or arm64, matching the host).
+# Build a Nuitka AppImage Linux client (amd64 or arm64, matching the host).
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -55,7 +55,9 @@ if [[ "$INSTALL_DEPS" == "1" ]]; then
     gstreamer1.0-plugins-bad \
     gstreamer1.0-libav \
     libgstreamer1.0-0 \
-    libgstreamer-plugins-base1.0-0
+    libgstreamer-plugins-base1.0-0 \
+    file \
+    desktop-file-utils
 fi
 
 if ! command -v gcc >/dev/null 2>&1 || ! command -v g++ >/dev/null 2>&1; then
@@ -91,8 +93,17 @@ if [[ -d "$OUT_DIR" ]]; then
 fi
 mkdir -p "$OUT_DIR"
 
+APPIMAGE_PATH="$OUT_DIR/KVM-Card-Mini.AppImage"
+
 uv run --python "$PYTHON_VERSION" --group packaging python -m nuitka \
   --standalone \
+  --linux-create-installer \
+  --linux-installer-output="$APPIMAGE_PATH" \
+  --linux-app-icon=icons/icon.ico \
+  --company-name=kiramint \
+  --product-name="KVM Card Mini" \
+  --file-description="USB KVM Card Mini desktop client" \
+  --product-version=0.1.0 \
   --static-libpython=no \
   --enable-plugin=pyside6 \
   --include-qt-plugins=multimedia \
@@ -124,36 +135,36 @@ uv run --python "$PYTHON_VERSION" --group packaging python -m nuitka \
   --noinclude-dlls=qt6pdf* \
   Mini-KVM.py
 
-DIST_PATH=""
+FOUND=""
 for candidate in \
-  "$OUT_DIR/Mini-KVM.dist" \
-  "$OUT_DIR/KVM-Card-Mini.dist"
+  "$APPIMAGE_PATH" \
+  "$OUT_DIR/Mini-KVM.AppImage" \
+  "$OUT_DIR/KVM-Card-Mini.AppImage"
 do
-  if [[ -d "$candidate" ]]; then
-    DIST_PATH="$candidate"
+  if [[ -f "$candidate" ]]; then
+    FOUND="$candidate"
     break
   fi
 done
 
-if [[ -z "$DIST_PATH" ]]; then
-  echo "Nuitka finished but no .dist folder was found in $OUT_DIR" >&2
+if [[ -z "$FOUND" ]]; then
+  shopt -s nullglob
+  extras=("$OUT_DIR"/*.AppImage)
+  if [[ ${#extras[@]} -gt 0 ]]; then
+    FOUND="${extras[0]}"
+  fi
+fi
+
+if [[ -z "$FOUND" ]]; then
+  echo "Nuitka finished but no AppImage was found in $OUT_DIR" >&2
   ls -la "$OUT_DIR" >&2
   exit 1
 fi
 
-BIN_PATH="$DIST_PATH/KVM-Card-Mini"
-if [[ ! -x "$BIN_PATH" ]]; then
-  if [[ -f "$BIN_PATH" ]]; then
-    chmod +x "$BIN_PATH"
-  elif [[ -f "$DIST_PATH/Mini-KVM" ]]; then
-    BIN_PATH="$DIST_PATH/Mini-KVM"
-    chmod +x "$BIN_PATH"
-  fi
-fi
-
-printf '%s' "$DIST_PATH" >"$OUT_DIR/.build-output"
+chmod +x "$FOUND"
+printf '%s' "$FOUND" >"$OUT_DIR/.build-output"
 
 echo
-echo "Built: $BIN_PATH"
-echo "Dist:  $DIST_PATH"
-echo "Runtime still needs system hidapi and (for video) GStreamer plugins. See Docs/linux.md."
+echo "Built: $FOUND"
+echo "Run with: \"$FOUND\""
+echo "HID access still needs the udev rule in Docs/udev/. See Docs/linux.md."

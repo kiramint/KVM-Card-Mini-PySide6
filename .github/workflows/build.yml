@@ -1,5 +1,5 @@
-# Native Nuitka standalone builds. Invokes Client/compiler-*.{ps1,sh}.
-# Targets: Windows amd64/arm64, Linux amd64/arm64, macOS arm64 (Apple Silicon).
+# Native Nuitka builds. Invokes Client/compiler-*.{ps1,sh}.
+# Targets: Windows amd64 onefile, Linux amd64/arm64 AppImage, macOS arm64 .app.
 name: Build
 
 on:
@@ -27,12 +27,6 @@ jobs:
             target: windows-amd64
             python: "3.11"
             msvc_arch: amd64
-            out_dir: build_windows
-            build: pwsh -File compiler-windows.ps1
-          - os: windows-11-arm
-            target: windows-arm64
-            python: "3.11-aarch64"
-            msvc_arch: arm64
             out_dir: build_windows
             build: pwsh -File compiler-windows.ps1
           - os: ubuntu-24.04
@@ -97,15 +91,7 @@ jobs:
             exit 1
           fi
           mkdir -p ../artifact
-          case "${{ matrix.target }}" in
-            macos-*)
-              cp -a "$out" ../artifact/
-              ;;
-            *)
-              mkdir -p ../artifact/KVM-Card-Mini
-              cp -a "$out"/. ../artifact/KVM-Card-Mini/
-              ;;
-          esac
+          cp -a "$out" ../artifact/
           ls -la ../artifact
 
       - name: Upload artifact

@@ -42,19 +42,18 @@ uv run python Mini-KVM.py
 
 Windows 专用包（`pyWinhook` / `pywin32`）带有平台标记，Linux 上不会安装。
 
-## 打包（Nuitka）
+## 打包（Nuitka AppImage）
 
-本机架构一份 standalone 目录（amd64 或 arm64）：
+本机架构一份 AppImage（amd64 或 arm64）：
 
 ```bash
 cd Client
 chmod +x compiler-linux.sh
 INSTALL_DEPS=1 ./compiler-linux.sh
+./build_linux/KVM-Card-Mini.AppImage
 ```
 
-结果在 `Client/build_linux/Mini-KVM.dist/`，入口是 `KVM-Card-Mini`。打包 Python 默认 3.12。`INSTALL_DEPS=1` 会 `apt` 安装 gcc、patchelf、libhidapi、GStreamer 和 xcb 相关包。跑起来仍需要系统 hidapi；采集卡预览还需要 GStreamer 插件（与上面「系统依赖」相同）。
-
-GitHub Actions 会在 `ubuntu-24.04` 和 `ubuntu-24.04-arm` 上各打一份。
+打包 Python 默认 3.12。`INSTALL_DEPS=1` 会 `apt` 安装 gcc、patchelf、libhidapi、GStreamer、xcb 以及 AppImage 所需的 `file`。打开 HID 仍需要上面的 udev 规则。GitHub Actions 会在 `ubuntu-24.04` 和 `ubuntu-24.04-arm` 上各打一份。
 
 ## 使用注意
 

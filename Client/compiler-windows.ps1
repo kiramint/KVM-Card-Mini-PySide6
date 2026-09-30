@@ -1,5 +1,5 @@
-# Build a Nuitka standalone Windows client (amd64 or arm64, matching the host).
-# Packaging Python defaults to 3.11 so pyWinhook wheels resolve on amd64.
+# Build a Nuitka onefile Windows client (amd64).
+# Packaging Python defaults to 3.11 so pyWinhook wheels resolve.
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
@@ -33,12 +33,11 @@ try {
 } catch {
     # Windows PowerShell 5.x without RuntimeInformation
 }
-$IsWinArm64 = $ArchName -match "Arm64"
-# uv on Windows ARM64 defaults to emulated x86_64 Python. Force native ARM64
-# so wheels (Nuitka, PySide6) match the interpreter.
-if ($IsWinArm64 -and $PythonVersion -notmatch "aarch64|arm64") {
-    $PythonVersion = "$PythonVersion-aarch64"
+if ($ArchName -match "Arm64") {
+    Write-Error "Windows packaging targets amd64 only. Run this script on an x64 machine."
+    exit 1
 }
+
 $env:UV_PYTHON = $PythonVersion
 $OutDir = "build_windows"
 $Jobs = [Environment]::ProcessorCount
@@ -48,9 +47,6 @@ Write-Host "Host architecture: $ArchName"
 Write-Host "Packaging Python: $PythonVersion"
 
 uv python install $PythonVersion
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-uv run --python $PythonVersion python -c "import platform, sys; print(sys.version); print('machine=', platform.machine())"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 uv sync --group packaging --python $PythonVersion
@@ -65,13 +61,15 @@ if (Test-Path -LiteralPath $OutDir) {
 New-Item -ItemType Directory -Path $OutDir | Out-Null
 
 $nuitkaArgs = @(
-    "--standalone",
+    "--onefile",
     "--windows-console-mode=disable",
     "--windows-icon-from-ico=icons\icon.ico",
+    "--company-name=kiramint",
     "--product-name=KVM Card Mini",
     "--file-description=USB KVM Card Mini desktop client",
     "--file-version=0.1.0",
     "--product-version=0.1.0",
+    "--onefile-tempdir-spec={CACHE_DIR}/kiramint/KVM-Card-Mini/0.1.0",
     "--msvc=latest",
     "--enable-plugin=pyside6",
     "--include-qt-plugins=multimedia",
@@ -84,6 +82,7 @@ $nuitkaArgs = @(
     "--include-module=hid",
     "--include-module=pythoncom",
     "--include-module=pywintypes",
+    "--include-module=pyWinhook",
     "--nofollow-import-to=win32api",
     "--nofollow-import-to=win32con",
     "--nofollow-import-to=win32gui",
@@ -103,11 +102,8 @@ $nuitkaArgs = @(
     "Mini-KVM.py"
 )
 
-if ($IsWinArm64) {
-    $nuitkaArgs = @("--nofollow-import-to=pyWinhook") + $nuitkaArgs
-    Write-Host "Windows ARM64: System hook (pyWinhook) is not packaged."
-} else {
-    $nuitkaArgs = @("--include-module=pyWinhook") + $nuitkaArgs
+if (Test-Path -LiteralPath "booting.png") {
+    $nuitkaArgs = @("--onefile-windows-splash-screen-image=booting.png") + $nuitkaArgs
 }
 
 uv run --python $PythonVersion --group packaging python -m nuitka @nuitkaArgs
@@ -115,30 +111,27 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-$DistPath = $null
-foreach ($candidate in @("$OutDir\Mini-KVM.dist", "$OutDir\KVM-Card-Mini.dist")) {
+$ExePath = $null
+foreach ($candidate in @("$OutDir\KVM-Card-Mini.exe", "$OutDir\Mini-KVM.exe")) {
     if (Test-Path -LiteralPath $candidate) {
-        $DistPath = $candidate
+        $ExePath = $candidate
         break
     }
 }
-
-if (-not $DistPath) {
-    Write-Error "Nuitka finished but no .dist folder was found in $OutDir"
-    Get-ChildItem -LiteralPath $OutDir | Format-Table
-    exit 1
-}
-
-$ExePath = Join-Path $DistPath "KVM-Card-Mini.exe"
-if (-not (Test-Path -LiteralPath $ExePath)) {
-    $fallback = Get-ChildItem -LiteralPath $DistPath -Filter "*.exe" | Select-Object -First 1
+if (-not $ExePath) {
+    $fallback = Get-ChildItem -LiteralPath $OutDir -Filter "*.exe" | Select-Object -First 1
     if ($fallback) {
         $ExePath = $fallback.FullName
     }
 }
 
-$DistPathUnix = $DistPath -replace '\\', '/'
-Set-Content -LiteralPath (Join-Path $OutDir ".build-output") -Value $DistPathUnix -NoNewline
+if (-not $ExePath) {
+    Write-Error "Nuitka finished but no .exe was found in $OutDir"
+    Get-ChildItem -LiteralPath $OutDir | Format-Table
+    exit 1
+}
+
+$ExePathUnix = ($ExePath -replace '\\', '/')
+Set-Content -LiteralPath (Join-Path $OutDir ".build-output") -Value $ExePathUnix -NoNewline
 Write-Host ""
 Write-Host "Built: $ExePath"
-Write-Host "Dist:  $DistPath"
