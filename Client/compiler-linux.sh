@@ -98,12 +98,31 @@ fi
 mkdir -p "$OUT_DIR"
 
 APPIMAGE_PATH="$OUT_DIR/KVM-Card-Mini.AppImage"
+ICON_PNG="$OUT_DIR/linux-app-icon.png"
+
+# appimagetool only accepts .png/.svg/.xpm; Nuitka copies the icon extension as-is.
+QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-offscreen}" \
+uv run --python "$PYTHON_VERSION" python - <<PY
+import os
+from PySide6.QtGui import QGuiApplication, QImage
+
+app = QGuiApplication([])
+img = QImage("icons/icon.ico")
+if img.isNull():
+    raise SystemExit("failed to load icons/icon.ico")
+if img.width() != 256 or img.height() != 256:
+    img = img.scaled(256, 256)
+out = os.environ.get("ICON_PNG") or "${ICON_PNG}"
+if not img.save(out, "PNG"):
+    raise SystemExit("failed to write %s" % out)
+print("Linux AppImage icon: %s (%sx%s)" % (out, img.width(), img.height()))
+PY
 
 uv run --python "$PYTHON_VERSION" --group packaging python -m nuitka \
   --standalone \
   --linux-create-installer \
   --linux-installer-output="$APPIMAGE_PATH" \
-  --linux-app-icon=icons/icon.ico \
+  --linux-app-icon="$ICON_PNG" \
   --company-name=kiramint \
   --product-name="KVM Card Mini" \
   --file-description="USB KVM Card Mini desktop client" \
