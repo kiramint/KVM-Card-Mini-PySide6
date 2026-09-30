@@ -137,7 +137,7 @@
                <number>32768</number>
               </property>
               <property name="value">
-               <number>5000</number>
+               <number>5001</number>
               </property>
              </widget>
             </item>
@@ -499,9 +499,7 @@
     <property name="title">
      <string>About</string>
     </property>
-    <addaction name="actionAuthor"/>
-    <addaction name="separator"/>
-    <addaction name="actionRaw_author"/>
+    <addaction name="actionAbout"/>
    </widget>
    <addaction name="menu_video_menu"/>
    <addaction name="menuVideo"/>
@@ -839,14 +837,9 @@
     <string>Web client</string>
    </property>
   </action>
-  <action name="actionAuthor">
+  <action name="actionAbout">
    <property name="text">
-    <string>Author: @ElluIFX</string>
-   </property>
-  </action>
-  <action name="actionRaw_author">
-   <property name="text">
-    <string>Raw author: @Jackadminx</string>
+    <string>About KVM Card Mini...</string>
    </property>
   </action>
   <action name="actionRelative_mouse">

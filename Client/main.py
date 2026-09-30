@@ -9,12 +9,24 @@ import time
 from typing import Tuple
 
 import hid_def
-import pythoncom
-import pyWinhook as pyHook
 import server_simple
 import yaml
 from default import default_config
+from input_map import SYSTEM_SHORTCUTS, key_event_to_set1
 from loguru import logger
+from about_dialog import AboutDialog
+from platform_util import (
+    APP_DISPLAY_NAME,
+    IS_MACOS,
+    IS_WINDOWS,
+    apply_resizable_dialog,
+    launch_tool,
+    relative_mouse_warp_supported,
+    resolve_data_dir,
+    restart_current_process,
+    ui_font,
+    user_data_dir,
+)
 from PySide6 import *
 from PySide6.QtCore import *
 from PySide6.QtGui import *
@@ -32,6 +44,10 @@ from ui import (
     usb_switch,
 )
 
+if IS_WINDOWS:
+    import pythoncom
+    import pyWinhook as pyHook
+
 """
 qdarktheme import after QT
 """
@@ -47,7 +63,8 @@ shift_symbol = [
     "<", ">", "?",
 ]  # fmt: skip
 PATH = os.path.dirname(os.path.abspath(__file__))
-ARGV_PATH = os.path.dirname(os.path.abspath(sys.argv[0]))
+ARGV_PATH = user_data_dir()
+DATA_DIR = resolve_data_dir(PATH)
 
 if not os.path.exists(os.path.join(ARGV_PATH, "config.yaml")):
     with open(os.path.join(ARGV_PATH, "config.yaml"), "w") as f:
@@ -209,53 +226,82 @@ class MyPushButton(QPushButton):
         self.setIconSize(QSize(18, 18))
 
 
+class MouseCaptureLayer(QWidget):
+    """Hittable overlay above QVideoWidget.
+
+    Qt6's video renderer is a native child that swallows hover unless a
+    sibling overlay sits on top. Cocoa also skips hit-testing for views
+    whose *window* opacity is ~0, so this widget stays fully opaque as a
+    view and only paints 1/255 black.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("kvmMouseLayer")
+        self.setMouseTracking(True)
+        self.setAttribute(Qt.WA_Hover, True)
+        self.setAttribute(Qt.WA_AlwaysStackOnTop, True)
+        self.setAttribute(Qt.WA_NativeWindow, True)
+        self.setFocusPolicy(Qt.NoFocus)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.fillRect(event.rect(), QColor(0, 0, 0, 1))
+
+
 class MyDeviceSetupDialog(QDialog, device_setup_dialog_ui.Ui_Dialog):
     def __init__(self, parent=None):
         super(MyDeviceSetupDialog, self).__init__(parent)
         self.setupUi(self)
-        self.setWindowFlags(Qt.CustomizeWindowHint | Qt.WindowCloseButtonHint)
-        self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
+        apply_resizable_dialog(
+            self, min_width=280, min_height=180, default_width=320, default_height=320
+        )
 
 
 class MyShortcutKeyDialog(QDialog, shortcut_key_ui.Ui_Dialog):
     def __init__(self, parent=None):
         super(MyShortcutKeyDialog, self).__init__(parent)
         self.setupUi(self)
-        self.setWindowFlags(Qt.CustomizeWindowHint | Qt.WindowCloseButtonHint)
-        self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
+        apply_resizable_dialog(
+            self, min_width=400, min_height=160, default_width=440, default_height=220
+        )
 
 
 class MyPasteBoardDialog(QDialog, paste_board_ui.Ui_Dialog):
     def __init__(self, parent=None):
         super(MyPasteBoardDialog, self).__init__(parent)
         self.setupUi(self)
-        self.setWindowFlags(Qt.CustomizeWindowHint | Qt.WindowCloseButtonHint)
-        self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
+        apply_resizable_dialog(
+            self, min_width=360, min_height=280, default_width=420, default_height=400
+        )
 
 
 class MyIndicatorDialog(QDialog, indicator_ui.Ui_Dialog):
     def __init__(self, parent=None):
         super(MyIndicatorDialog, self).__init__(parent)
         self.setupUi(self)
-        self.setWindowFlags(Qt.CustomizeWindowHint | Qt.WindowCloseButtonHint)
-        self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
+        apply_resizable_dialog(
+            self, min_width=400, min_height=80, default_width=440, default_height=110
+        )
 
 
 class MyNumKeyboardDialog(QDialog, numboard_ui.Ui_Dialog):
     def __init__(self, parent=None):
         super(MyNumKeyboardDialog, self).__init__(parent)
         self.setupUi(self)
-        self.setWindowFlags(Qt.CustomizeWindowHint | Qt.WindowCloseButtonHint)
-        self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
-        self.setFixedWidth(self.width())
+        apply_resizable_dialog(
+            self, min_width=340, min_height=246, default_width=380, default_height=320
+        )
 
 
 class MyUsbSwitchDialog(QDialog, usb_switch.Ui_Dialog):
     def __init__(self, parent=None):
         super(MyUsbSwitchDialog, self).__init__(parent)
         self.setupUi(self)
-        self.setWindowFlags(Qt.CustomizeWindowHint | Qt.WindowCloseButtonHint)
-        self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
+        apply_resizable_dialog(
+            self, min_width=360, min_height=260, default_width=400, default_height=380
+        )
 
 
 class HidWorker(QObject):
@@ -333,6 +379,7 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
         self.audio_opened = False
         self.video_recording = False
         self.device_connected = False
+        self._keyboard_grabbed = False
         self.fpsc = FPSCounter()
 
         # 子窗口
@@ -405,14 +452,14 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
         # 导入外部数据
         try:
             with open(
-                    os.path.join(PATH, "data", "keyboard_hid2code.yaml"), "r"
+                    os.path.join(DATA_DIR, "keyboard_hid2code.yaml"), "r"
             ) as load_f:
                 self.keyboard_hid2code = yaml.safe_load(load_f)
             with open(
-                    os.path.join(PATH, "data", "keyboard_scancode2hid.yml"), "r"
+                    os.path.join(DATA_DIR, "keyboard_scancode2hid.yml"), "r"
             ) as load_f:
                 self.keyboard_scancode2hid = yaml.safe_load(load_f)
-            with open(os.path.join(PATH, "data", "keyboard.yaml"), "r") as load_f:
+            with open(os.path.join(DATA_DIR, "keyboard.yaml"), "r") as load_f:
                 self.keyboard_code = yaml.safe_load(load_f)
             with open(os.path.join(ARGV_PATH, "config.yaml"), "r") as load_f:
                 self.configfile = yaml.safe_load(load_f)
@@ -472,9 +519,7 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
         self.statusbar_lable2 = QLabel()
         self.statusbar_lable3 = QLabel()
         self.statusbar_lable4 = QLabel()
-        font = QFont()
-        font.setFamily("Microsoft YaHei UI")
-        font.setBold(True)
+        font = ui_font()
         self.statusbar_lable1.setFont(font)
         self.statusbar_lable2.setFont(font)
         self.statusbar_lable3.setFont(font)
@@ -574,15 +619,21 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
             self.set_checked(self.actionKeep_ratio, True)
         self.set_checked(self.actionQuick_paste, True)
 
-        # 初始化监视器
+        # 初始化监视器：视频层与鼠标层叠在同一宿主里，避免 QVideoWidget
+        # 的 native 渲染层盖住子控件、吃掉无按键的 MouseMove。
         self.setCentralWidget(self.serverFrame)
         self.serverFrame.setHidden(True)
+
+        self.viewport_host = QWidget()
+        self.viewport_host.setMouseTracking(True)
+        self.viewport_host.setAttribute(Qt.WA_Hover, True)
+        viewport_grid = QGridLayout(self.viewport_host)
+        viewport_grid.setContentsMargins(0, 0, 0, 0)
+        viewport_grid.setSpacing(0)
+
         self.videoWidget = QVideoWidget()
         self.videoWidget.setAttribute(Qt.WA_OpaquePaintEvent)
-        self.takeCentralWidget()
-        self.setCentralWidget(self.videoWidget)
-        self.videoWidget.setMouseTracking(True)
-        self.videoWidget.children()[0].setMouseTracking(True)
+        self.videoWidget.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self.videoWidget.hide()
 
         s_format = QSurfaceFormat.defaultFormat()
@@ -592,15 +643,35 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
         self.disconnect_label = QLabel()
         self.disconnect_label.setPixmap(load_pixmap("disconnected"))
         self.disconnect_label.setAlignment(Qt.AlignCenter)
-        self.disconnect_label.setMouseTracking(True)
+        self.disconnect_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+
+        self._mouse_layer = MouseCaptureLayer(self.viewport_host)
+        viewport_grid.addWidget(self.videoWidget, 0, 0)
+        viewport_grid.addWidget(self.disconnect_label, 0, 0)
+        viewport_grid.addWidget(self._mouse_layer, 0, 0)
+
         self.takeCentralWidget()
-        self.setCentralWidget(self.disconnect_label)
+        self.setCentralWidget(self.viewport_host)
         self.disconnect_label.show()
+        self.setMouseTracking(True)
+        self._viewport_mouse_wired = False
+        self._video_child_count = -1
+        self._wire_viewport_mouse(self.viewport_host)
+        self._raise_mouse_layer()
 
         # 快捷键菜单设置快捷键名称
         for i, name in enumerate(self.configfile["shortcut_key"]["shortcut_key_name"]):
             action = self.menuShortcut_key.addAction(name)
             action.triggered.connect(lambda checked, i=i: self.shortcut_key_action(i))
+
+        self.menuSystemShortcuts = QMenu(self.tr("System shortcuts"), self)
+        self.menuSystemShortcuts.setIcon(load_icon("keyboard-outline"))
+        self.menuKeyboard.insertMenu(self.actionCustomKey, self.menuSystemShortcuts)
+        for name, buf in SYSTEM_SHORTCUTS:
+            action = self.menuSystemShortcuts.addAction(name)
+            action.triggered.connect(
+                lambda checked=False, b=buf: self.send_hid_shortcut(b)
+            )
 
         # 按键绑定
         self.action_video_device_connect.triggered.connect(
@@ -680,12 +751,7 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
             self.update_server_device_info
         )
 
-        self.actionAuthor.triggered.connect(
-            lambda: QDesktopServices.openUrl(QUrl("https://github.com/ElluIFX"))
-        )
-        self.actionRaw_author.triggered.connect(
-            lambda: QDesktopServices.openUrl(QUrl("https://github.com/Jackadminx"))
-        )
+        self.actionAbout.triggered.connect(self.open_about_dialog)
 
         self.device_setup_dialog.checkBoxAudio.setChecked(
             self.audio_config["audio_support"]
@@ -728,8 +794,6 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
         self.check_device_timer.timeout.connect(self.check_device_status)
         self.check_device_timer.start(1000)
 
-        # self.setMouseTracking(True)
-
         self.mouse_scroll_timer = QTimer()
         self.mouse_scroll_timer.timeout.connect(self.mouse_scroll_stop)
 
@@ -756,12 +820,27 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
         self.reset_keymouse(4)
 
         self.hook_state = False
-        self.hook_manager = pyHook.HookManager()
-        self.hook_manager.KeyDown = self.hook_keyboard_down_event
-        self.hook_manager.KeyUp = self.hook_keyboard_up_event
-        self.pythoncom_timer = QTimer()
-        self.pythoncom_timer.timeout.connect(lambda: pythoncom.PumpWaitingMessages())
+        self.hook_manager = None
+        self.pythoncom_timer = None
         self.hook_pressed_keys = []
+        self._keyboard_grabbed = False
+        if IS_WINDOWS:
+            self.hook_manager = pyHook.HookManager()
+            self.hook_manager.KeyDown = self.hook_keyboard_down_event
+            self.hook_manager.KeyUp = self.hook_keyboard_up_event
+            self.pythoncom_timer = QTimer()
+            self.pythoncom_timer.timeout.connect(
+                lambda: pythoncom.PumpWaitingMessages()
+            )
+        else:
+            self.actionSystem_hook.setVisible(False)
+            self.actionOn_screen_Keyboard.setVisible(False)
+            self.actionWindows_Audio_Setting.setVisible(False)
+            self.actionWindows_Device_Manager.setVisible(False)
+            self.statusbar_btn5.hide()
+            self.statusbar_btn1.setToolTip(
+                self.tr("System keys (Win/Alt+Tab) cannot be captured; use Keyboard → System shortcuts")
+            )
 
         self.status["init_ok"] = True
 
@@ -823,7 +902,10 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
             else:
                 self.num_keyboard_func()
         elif act == 5:
-            self.system_hook_func()
+            if IS_WINDOWS:
+                self.system_hook_func()
+            elif self.menuSystemShortcuts is not None:
+                self.menuSystemShortcuts.exec(QCursor.pos())
         elif act == 6:
             self.device_config()
         elif act == 7:
@@ -858,8 +940,6 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
             self.device_setup_dialog.label_4.show()
             self.device_setup_dialog.label_5.show()
             self.device_setup_dialog.label_7.show()
-            self.device_setup_dialog.setMaximumHeight(270)
-            self.device_setup_dialog.setMinimumHeight(270)
             self.update_audio_devices()
         else:
             self.device_setup_dialog.comboBox_4.hide()
@@ -867,8 +947,6 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
             self.device_setup_dialog.label_4.hide()
             self.device_setup_dialog.label_5.hide()
             self.device_setup_dialog.label_7.hide()
-            self.device_setup_dialog.setMaximumHeight(200)
-            self.device_setup_dialog.setMinimumHeight(200)
         self.device_setup_dialog.adjustSize()
 
     def update_audio_devices(self):
@@ -1047,10 +1125,7 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
         self.statusbar_icon1.setPixmap(load_pixmap("video-off"))
         self.camera_opened = False
         self.camera_info = None
-        self.takeCentralWidget()
-        self.setCentralWidget(self.disconnect_label)
-        self.videoWidget.hide()
-        self.disconnect_label.show()
+        self._show_kvm_view(video=False)
         self.setWindowTitle("USB KVM Client")
         QTimer.singleShot(0, self._release_camera)
         self.check_device_status()
@@ -1060,6 +1135,11 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
         self.videoWidget.videoSink().setVideoFrame(frame)
         self.videoWidget.update()
         self.videoWidget.repaint()
+        kids = len(self.videoWidget.children())
+        if kids != getattr(self, "_video_child_count", -1):
+            self._video_child_count = kids
+            self._wire_viewport_mouse(self.videoWidget)
+            self._raise_mouse_layer()
 
     def _disconnect_quietly(self, obj, signal_name, slot):
         if obj is None:
@@ -1332,10 +1412,10 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
                 self.resize_window_func(center=center)
             fps = self.camera.cameraFormat().maxFrameRate()
             self.device_event_handle("video_ok")
-            self.takeCentralWidget()
-            self.setCentralWidget(self.videoWidget)
-            self.disconnect_label.hide()
-            self.videoWidget.show()
+            self._show_kvm_view(video=True)
+            self._video_child_count = -1
+            self._wire_viewport_mouse(self.videoWidget)
+            self._raise_mouse_layer()
             self.setWindowTitle(
                 f"USB KVM Client - {self.video_config['resolution_X']}x{self.video_config['resolution_Y']} @ {fps:.1f}"
             )
@@ -1347,24 +1427,38 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
                 return
             self._release_camera()
             self.device_event_handle("video_close")
-            self.takeCentralWidget()
-            self.setCentralWidget(self.disconnect_label)
-            self.videoWidget.hide()
-            self.disconnect_label.show()
+            self._show_kvm_view(video=False)
             self.setWindowTitle("USB KVM Client")
+
+    def _set_keyboard_grab(self, grabbed: bool):
+        if grabbed == self._keyboard_grabbed:
+            return
+        try:
+            if grabbed:
+                self.grabKeyboard()
+            else:
+                self.releaseKeyboard()
+            self._keyboard_grabbed = grabbed
+        except Exception:
+            self._keyboard_grabbed = False
 
     # 捕获鼠标功能
     def capture_mouse(self):
         self.status["mouse_capture"] = True
+        self._last_abs_hid = None
+        self._last_mouse_pos = None
         self.statusbar_icon3.setPixmap(load_pixmap("mouse"))
-        self.statusBar().showMessage(
-            self.tr("Mouse capture on (Press Right-Ctrl to release)")
-        )
+        hint = self.tr("Mouse capture on (Press Right-Ctrl to release)")
+        if not IS_WINDOWS:
+            hint += self.tr("; system keys: Keyboard → System shortcuts")
+        self.statusBar().showMessage(hint)
+        self._set_keyboard_grab(True)
         self.set_ws2812b(0, 30, 30)
 
     # 释放鼠标功能
     def release_mouse(self):
         self.status["mouse_capture"] = False
+        self._set_keyboard_grab(False)
         self._hid_signal.emit([2, 0, 0, 0, 0, 0, 0, 0, 0])
         self.statusbar_icon3.setPixmap(load_pixmap("mouse-off"))
         self.qt_sleep(10)
@@ -1458,6 +1552,7 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
                 self.device_event_handle("hid_ok")
             self.statusbar_icon2.setPixmap(load_pixmap("keyboard-off"))
             self.status["mouse_capture"] = False
+            self._set_keyboard_grab(False)
             self.statusbar_icon3.setPixmap(load_pixmap("mouse-off"))
         elif s == 3:  # mouse
             for i in range(2, len(mouse_buffer)):
@@ -1660,7 +1755,10 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
             get = self.configfile["shortcut_key"]["shortcut_key_hidcode"][s]
         except Exception:
             return
-        self._hid_signal.emit(get)
+        self.send_hid_shortcut(get)
+
+    def send_hid_shortcut(self, buf):
+        self._hid_signal.emit(list(buf))
         self.qt_sleep(10)
         self._hid_signal.emit([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
 
@@ -1672,6 +1770,7 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
             )
             self.statusbar_icon2.setPixmap(load_pixmap("keyboard-off"))
             self.status["mouse_capture"] = False
+            self._set_keyboard_grab(False)
             self.statusbar_icon3.setPixmap(load_pixmap("mouse-off"))
             self.device_connected = False
             self.check_device_timer.stop()
@@ -1686,10 +1785,20 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
             self.camera_opened = False
             self.statusbar_icon3.setPixmap(load_pixmap("mouse-off"))
             self.status["mouse_capture"] = False
+            self._set_keyboard_grab(False)
             self.set_ws2812b(30, 30, 0)
             self.check_device_timer.start(1000)
         elif s == "hid_init_error":
-            self.statusBar().showMessage(self.tr("Keyboard Mouse initialization error"))
+            if sys.platform.startswith("linux"):
+                self.statusBar().showMessage(
+                    self.tr(
+                        "Keyboard Mouse initialization error (check udev rules and /dev/hidraw*)"
+                    )
+                )
+            else:
+                self.statusBar().showMessage(
+                    self.tr("Keyboard Mouse initialization error")
+                )
             self.statusbar_icon2.setPixmap(load_pixmap("keyboard-off"))
             self.device_connected = False
             self.check_device_timer.stop()
@@ -1708,6 +1817,7 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
             self.status["mouse_capture"] = True
             self.statusbar_icon3.setPixmap(load_pixmap("mouse"))
             self.camera_opened = True
+            self._set_keyboard_grab(True)
             self.set_ws2812b(0, 30, 30)
             self.check_device_timer.stop()
         elif s == "device_disconnect":
@@ -1715,6 +1825,7 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
             self.statusbar_icon2.setPixmap(load_pixmap("keyboard-off"))
             self.statusbar_icon3.setPixmap(load_pixmap("mouse-off"))
             self.status["mouse_capture"] = False
+            self._set_keyboard_grab(False)
             self.device_connected = False
             self.check_device_timer.stop()
         elif s == "video_disconnect":
@@ -1739,18 +1850,10 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
 
     # 菜单小工具
     def menu_tools_actions(self, s):
-        if s == 0:
-            os.popen("osk")
-        elif s == 1:
-            os.popen("calc")
-        elif s == 2:
-            os.popen("SnippingTool")
-        elif s == 3:
-            os.popen("notepad")
-        elif s == 4:
-            os.popen("rundll32.exe shell32.dll, Control_RunDLL mmsys.cpl")
-        elif s == 5:
-            os.popen("devmgmt.msc")
+        if not launch_tool(s):
+            self.statusBar().showMessage(
+                self.tr("No matching tool found on this system")
+            )
 
     # 状态栏显示组合键状态
     def shortcut_status(self, s=[0, 0, 0]):
@@ -1874,6 +1977,11 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
         )
 
     def system_hook_func(self):
+        if not IS_WINDOWS or self.hook_manager is None:
+            self.statusBar().showMessage(
+                self.tr("System hook is not available on this platform; use Keyboard → System shortcuts")
+            )
+            return
         self.hook_state = not self.hook_state
         self.set_checked(self.actionSystem_hook, self.hook_state)
         self.statusBar().showMessage(
@@ -1892,9 +2000,12 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
         self.status["relative_mouse"] = not self.status["relative_mouse"]
         self.set_checked(self.actionRelative_mouse, self.status["relative_mouse"])
         # self.reset_keymouse(3)
-        self.statusBar().showMessage(
-            self.tr("Relative mouse: ") + str_bool(self.status["relative_mouse"])
-        )
+        message = self.tr("Relative mouse: ") + str_bool(self.status["relative_mouse"])
+        if self.status["relative_mouse"] and not relative_mouse_warp_supported():
+            message += self.tr(
+                " (pointer warp is unavailable on Wayland; cursor may hit the screen edge)"
+            )
+        self.statusBar().showMessage(message)
 
     # 粘贴板
     def paste_board_func(self):
@@ -2171,6 +2282,7 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
             self.statusBar().show()
             self.menuBar().show()
             self.set_checked(self.action_fullscreen, False)
+        self._raise_mouse_layer()
 
     # 隐藏指针
     def hide_cursor_func(self):
@@ -2191,6 +2303,7 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
             Qt.WindowStaysOnTopHint if self.status["topmost"] else Qt.Widget
         )
         self.show()
+        self._raise_mouse_layer()
         self.statusBar().showMessage(
             self.tr("Window always on top: ") + str_bool(self.status["topmost"])
         )
@@ -2224,8 +2337,8 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
         info.Cancel = info.addButton(self.tr("Not now"), QMessageBox.RejectRole)
         info.exec()
         if info.clickedButton() == info.Ok:
-            os.startfile(sys.argv[0])
-            sys.exit(0)
+            restart_current_process()
+            return
 
     def mouseButton_to_int(self, s: Qt.MouseButton):
         if s == Qt.LeftButton:
@@ -2323,8 +2436,82 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
             self.statusBar().show()
         self.mouse_action_timer.stop()
 
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._raise_mouse_layer()
+
     def hid_report(self, buf: list[int]):
         self._hid_call(buf)
+
+    def _show_kvm_view(self, video=False):
+        host = getattr(self, "viewport_host", None)
+        if host is None:
+            return
+        if self.centralWidget() is not host:
+            self.takeCentralWidget()
+            self.setCentralWidget(host)
+        if video:
+            self.disconnect_label.hide()
+            self.videoWidget.show()
+        else:
+            self.videoWidget.hide()
+            self.disconnect_label.show()
+        self._raise_mouse_layer()
+
+    def _raise_mouse_layer(self):
+        layer = getattr(self, "_mouse_layer", None)
+        host = getattr(self, "viewport_host", None)
+        if layer is None or host is None:
+            return
+        layer.setGeometry(host.rect())
+        layer.raise_()
+        layer.show()
+        layer.winId()
+
+    def _ensure_mouse_layer(self, parent=None):
+        self._raise_mouse_layer()
+
+    def _wire_viewport_mouse(self, widget):
+        if widget is None:
+            return
+        widget.setMouseTracking(True)
+        widget.setAttribute(Qt.WA_Hover, True)
+        widget.installEventFilter(self)
+        for child in widget.findChildren(QWidget):
+            child.setMouseTracking(True)
+            child.setAttribute(Qt.WA_Hover, True)
+            child.installEventFilter(self)
+        self._viewport_mouse_wired = True
+
+    def _is_viewport_obj(self, obj):
+        host = getattr(self, "viewport_host", None)
+        if host is None:
+            return False
+        if obj is host:
+            return True
+        return isinstance(obj, QWidget) and (obj is host or host.isAncestorOf(obj))
+
+    def _event_global_pos(self, event):
+        if hasattr(event, "globalPosition"):
+            try:
+                return event.globalPosition().toPoint()
+            except Exception:
+                pass
+        if hasattr(event, "globalPos"):
+            try:
+                return event.globalPos()
+            except Exception:
+                pass
+        return QCursor.pos()
+
+    def _viewport_widget(self):
+        host = getattr(self, "viewport_host", None)
+        if host is not None and host.isVisible() and self.centralWidget() is host:
+            return host
+        if self.camera_opened and getattr(self, "videoWidget", None) is not None:
+            if self.videoWidget.isVisible():
+                return self.videoWidget
+        return getattr(self, "disconnect_label", None)
 
     # 鼠标移动事件
     _last_mouse_pos = None
@@ -2332,8 +2519,8 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
     def mouseMoveEvent(self, event):
         if self.ignore_event:
             return
-        p = event.position().toPoint()
-        x, y = p.x(), p.y()
+        win_pos = self.mapFromGlobal(self._event_global_pos(event))
+        x, y = win_pos.x(), win_pos.y()
         if self.status["fullscreen"]:
             if (y < 2 and x < 2) or (x > self.width() - 2 and y > self.height() - 2):
                 if (
@@ -2366,88 +2553,114 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
             self.setCursor(Qt.ArrowCursor)
         if not self.status["relative_mouse"]:
             self._last_mouse_pos = None
-            if not self.camera_opened:
-                x_res = self.disconnect_label.width()
-                y_res = self.disconnect_label.height()
-                width = self.disconnect_label.width()
-                height = self.disconnect_label.height()
-                # x_pos = self.disconnect_label.pos().x()
-                y_pos = self.disconnect_label.pos().y()
-            else:
-                x_res = self.video_config["resolution_X"]
-                y_res = self.video_config["resolution_Y"]
-                width = self.videoWidget.width()
-                height = self.videoWidget.height()
-                # x_pos = self.videoWidget.pos().x()
-                y_pos = self.videoWidget.pos().y()
-            x_diff = 0
-            y_diff = 0
-            if self.video_config["keep_aspect_ratio"]:
-                cam_scale = y_res / x_res
-                finder_scale = height / width
-                if finder_scale > cam_scale:
-                    x_diff = 0
-                    y_diff = height - width * cam_scale
-                elif finder_scale < cam_scale:
-                    x_diff = width - height / cam_scale
-                    y_diff = 0
-            x_hid = (x - x_diff / 2) / (width - x_diff)
-            y_hid = (y - y_diff / 2 - y_pos) / (height - y_diff)
-            x_hid = max(min(x_hid, 1), 0)
-            y_hid = max(min(y_hid, 1), 0)
-            if self.status["RGB_mode"]:
-                self.set_ws2812b(
-                    x_hid * 255, y_hid * 255, (1 - x_hid) * (1 - y_hid) * 255
-                )
-            self.statusBar().showMessage(f"X={x_hid * x_res:.0f}, Y={y_hid * y_res:.0f}")
-            t = time.perf_counter()
-            self._last_mouse_report = t
-            x_hid = int(x_hid * 0x7FFF)
-            y_hid = int(y_hid * 0x7FFF)
-            mouse_buffer[3] = x_hid & 0xFF
-            mouse_buffer[4] = x_hid >> 8
-            mouse_buffer[5] = y_hid & 0xFF
-            mouse_buffer[6] = y_hid >> 8
-            self._new_mouse_report = 1
+            if self._update_abs_mouse_from_global(self._event_global_pos(event)):
+                self._new_mouse_report = 1
         else:
-            middle_pos = self.mapToGlobal(QPoint(self.width() / 2, self.height() / 2))
-            mouse_pos = QCursor.pos()
-            if self._last_mouse_pos is not None:
-                self.rel_x += (
-                                      mouse_pos.x() - self._last_mouse_pos.x()
-                              ) * self.relative_mouse_speed
-                self.rel_y += (
-                                      mouse_pos.y() - self._last_mouse_pos.y()
-                              ) * self.relative_mouse_speed
+            self._sample_relative_from_cursor()
+
+    def _update_abs_mouse_from_global(self, gpos):
+        view = self._viewport_widget()
+        if view is None:
+            return False
+        local = view.mapFromGlobal(gpos)
+        vx, vy = local.x(), local.y()
+        if not self.camera_opened:
+            x_res = view.width()
+            y_res = view.height()
+        else:
+            x_res = self.video_config["resolution_X"]
+            y_res = self.video_config["resolution_Y"]
+        width = view.width()
+        height = view.height()
+        x_diff = 0
+        y_diff = 0
+        if self.video_config["keep_aspect_ratio"] and x_res and y_res:
+            cam_scale = y_res / x_res
+            finder_scale = height / width if width else 1
+            if finder_scale > cam_scale:
+                x_diff = 0
+                y_diff = height - width * cam_scale
+            elif finder_scale < cam_scale:
+                x_diff = width - height / cam_scale
+                y_diff = 0
+        denom_x = width - x_diff
+        denom_y = height - y_diff
+        if denom_x == 0 or denom_y == 0:
+            return False
+        x_hid = (vx - x_diff / 2) / denom_x
+        y_hid = (vy - y_diff / 2) / denom_y
+        x_hid = max(min(x_hid, 1), 0)
+        y_hid = max(min(y_hid, 1), 0)
+        if self.status["RGB_mode"]:
+            self.set_ws2812b(
+                x_hid * 255, y_hid * 255, (1 - x_hid) * (1 - y_hid) * 255
+            )
+        self.statusBar().showMessage(f"X={x_hid * x_res:.0f}, Y={y_hid * y_res:.0f}")
+        self._last_mouse_report = time.perf_counter()
+        x_rep = int(x_hid * 0x7FFF)
+        y_rep = int(y_hid * 0x7FFF)
+        prev = getattr(self, "_last_abs_hid", None)
+        if prev == (x_rep, y_rep):
+            return False
+        self._last_abs_hid = (x_rep, y_rep)
+        mouse_buffer[3] = x_rep & 0xFF
+        mouse_buffer[4] = x_rep >> 8
+        mouse_buffer[5] = y_rep & 0xFF
+        mouse_buffer[6] = y_rep >> 8
+        return True
+
+    def _sample_relative_from_cursor(self):
+        middle_pos = self.mapToGlobal(QPoint(self.width() / 2, self.height() / 2))
+        mouse_pos = QCursor.pos()
+        if self._last_mouse_pos is not None:
+            dx = mouse_pos.x() - self._last_mouse_pos.x()
+            dy = mouse_pos.y() - self._last_mouse_pos.y()
+            if dx or dy:
+                self.rel_x += dx * self.relative_mouse_speed
+                self.rel_y += dy * self.relative_mouse_speed
                 self._new_mouse_report = 2
-                self._last_mouse_pos = mouse_pos
-                if (
-                        abs(mouse_pos.x() - middle_pos.x()) > 25
-                        or abs(mouse_pos.y() - middle_pos.y()) > 25
-                ):
-                    QCursor.setPos(middle_pos)
-                    self._last_mouse_pos = middle_pos
-            else:
+            self._last_mouse_pos = mouse_pos
+            if relative_mouse_warp_supported() and (
+                abs(mouse_pos.x() - middle_pos.x()) > 25
+                or abs(mouse_pos.y() - middle_pos.y()) > 25
+            ):
+                QCursor.setPos(middle_pos)
                 self._last_mouse_pos = middle_pos
+        else:
+            self._last_mouse_pos = (
+                mouse_pos if not relative_mouse_warp_supported() else middle_pos
+            )
+            if relative_mouse_warp_supported():
                 QCursor.setPos(middle_pos)
 
     def mouse_report_timeout(self):
-        if self._new_mouse_report == 1:
-            self._hid_signal.emit(mouse_buffer)
-        elif self._new_mouse_report == 2:
-            x_hid = round(self.rel_x)
-            y_hid = round(self.rel_y)
-            self.rel_x -= x_hid
-            self.rel_y -= y_hid
-            x_hid = max(min(x_hid, 127), -127)
-            y_hid = max(min(y_hid, 127), -127)
-            x_hid += 0xFF if x_hid < 0 else 0
-            y_hid += 0xFF if y_hid < 0 else 0
-            mouse_buffer_rel[3] = x_hid & 0xFF
-            mouse_buffer_rel[4] = y_hid & 0xFF
-            self._hid_signal.emit(mouse_buffer_rel)
-            mouse_buffer_rel[3] = 0
-            mouse_buffer_rel[4] = 0
+        if not self.status.get("mouse_capture"):
+            self._new_mouse_report = 0
+            return
+        if self.centralWidget() is not getattr(self, "viewport_host", None):
+            self._new_mouse_report = 0
+            return
+        if self.status["relative_mouse"]:
+            if self._new_mouse_report != 2:
+                self._sample_relative_from_cursor()
+            if self._new_mouse_report == 2:
+                x_hid = round(self.rel_x)
+                y_hid = round(self.rel_y)
+                self.rel_x -= x_hid
+                self.rel_y -= y_hid
+                x_hid = max(min(x_hid, 127), -127)
+                y_hid = max(min(y_hid, 127), -127)
+                x_hid += 0xFF if x_hid < 0 else 0
+                y_hid += 0xFF if y_hid < 0 else 0
+                mouse_buffer_rel[3] = x_hid & 0xFF
+                mouse_buffer_rel[4] = y_hid & 0xFF
+                self._hid_signal.emit(mouse_buffer_rel)
+                mouse_buffer_rel[3] = 0
+                mouse_buffer_rel[4] = 0
+        else:
+            moved = self._update_abs_mouse_from_global(QCursor.pos())
+            if moved or self._new_mouse_report == 1:
+                self._hid_signal.emit(mouse_buffer)
         self._new_mouse_report = 0
 
     scan_to_b2 = {
@@ -2536,6 +2749,33 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
         self._hid_signal.emit(kb_buffer)
         return 0
 
+    def eventFilter(self, obj, event):
+        et = event.type()
+        if self._is_viewport_obj(obj) and et in (
+            QEvent.MouseMove,
+            QEvent.HoverMove,
+            QEvent.MouseButtonPress,
+            QEvent.MouseButtonRelease,
+            QEvent.Wheel,
+        ):
+            if et in (QEvent.MouseMove, QEvent.HoverMove):
+                self.mouseMoveEvent(event)
+            elif et == QEvent.MouseButtonPress:
+                self.mousePressEvent(event)
+            elif et == QEvent.MouseButtonRelease:
+                self.mouseReleaseEvent(event)
+            elif et == QEvent.Wheel:
+                self.wheelEvent(event)
+            return True
+        # Swallow host Quit (Cmd+Q / Ctrl+Q) while capturing so it goes to the target.
+        if et == QEvent.ShortcutOverride and self.status.get("mouse_capture"):
+            key = event.key()
+            mods = event.modifiers()
+            if key == Qt.Key_Q and mods & (Qt.ControlModifier | Qt.MetaModifier):
+                event.accept()
+                return True
+        return super().eventFilter(obj, event)
+
     # 键盘按下事件
     def keyPressEvent(self, event):
         if self.ignore_event:
@@ -2546,7 +2786,10 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
         if kb_buffer[2] == 7 and event.key() == self.fullscreen_key:
             self.fullscreen_func()
             return
-        self.keyPress(event.nativeScanCode())
+        scancode = key_event_to_set1(event)
+        if scancode is None:
+            return
+        self.keyPress(scancode)
 
     def keyPress(self, scancode: int):
         # Ctrl+Alt+Shift+V quick paste
@@ -2578,7 +2821,10 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
             return
         if self.ignore_event:
             return
-        self.keyRelease(event.nativeScanCode())
+        scancode = key_event_to_set1(event)
+        if scancode is None:
+            return
+        self.keyRelease(scancode)
 
     def keyRelease(self, scancode: int):
         self.update_kb(scancode, False)
@@ -2601,7 +2847,8 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
             timer = getattr(self, timer_name, None)
             if timer is not None:
                 timer.stop()
-        if getattr(self, "hook_state", False):
+        self._set_keyboard_grab(False)
+        if getattr(self, "hook_state", False) and self.hook_manager is not None:
             try:
                 self.hook_manager.UnhookKeyboard()
             except Exception:
@@ -2752,6 +2999,15 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
             )
             self.kvmSetFormatCombo.setCurrentText(self.video_config["format"])
 
+    def open_about_dialog(self):
+        dlg = getattr(self, "_about_dialog", None)
+        if dlg is None:
+            dlg = AboutDialog(self)
+            self._about_dialog = dlg
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+
     def open_server_manager(self):
         if not self.serverFrame.isVisible():
             if self.camera_opened:
@@ -2768,7 +3024,6 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
                     return
             self.takeCentralWidget()
             self.setCentralWidget(self.serverFrame)
-            self.disconnect_label.hide()
             self.serverFrame.show()
             self.actionOpen_Server_Manager.setText(self.tr("Close Server Manager"))
             self.refresh_server_device_list()
@@ -2788,10 +3043,8 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
                     self.on_btnServerSwitch_clicked()
                 else:
                     return
-            self.takeCentralWidget()
-            self.setCentralWidget(self.disconnect_label)
             self.serverFrame.hide()
-            self.disconnect_label.show()
+            self._show_kvm_view(video=False)
             self.actionOpen_Server_Manager.setText(self.tr("Open Server Manager"))
 
     @Slot()
@@ -2905,6 +3158,8 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
         progress.setAutoClose(True)
         progress.setCancelButton(None)
         progress.resize(340, 160)
+        progress.setMinimumHeight(120)
+        progress.setSizeGripEnabled(True)
         progress.setValue(0)
         progress.show()
 
@@ -3058,7 +3313,8 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
         if self._restore_track:
             self._restore_track = False
             self.status["mouse_capture"] = True
-        if self.hook_state:
+            self._set_keyboard_grab(True)
+        if self.hook_state and self.hook_manager is not None:
             self.pythoncom_timer.start(5)
             self.hook_manager.HookKeyboard()
             self.statusbar_btn5.setPixmap(load_pixmap("hook"))
@@ -3068,7 +3324,8 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
         if self.status["mouse_capture"]:
             self.status["mouse_capture"] = False
             self._restore_track = True
-        if self.hook_state:
+            self._set_keyboard_grab(False)
+        if self.hook_state and self.hook_manager is not None:
             self.hook_manager.UnhookKeyboard()
             self.pythoncom_timer.stop()
             self.statusbar_btn5.setPixmap(load_pixmap("hook-off"))
@@ -3085,9 +3342,52 @@ def clear_splash():
             os.unlink(splash_filename)
 
 
+def _request_macos_media_permissions(app, window):
+    permissions = []
+    for factory in (QCameraPermission, QMicrophonePermission):
+        try:
+            permissions.append(factory())
+        except Exception:
+            continue
+    if not permissions:
+        return
+
+    def _on_result(result):
+        logger.info(f"Media permission result: {result.status()}")
+        if result.status() == Qt.PermissionStatus.Denied:
+            QMessageBox.warning(
+                window,
+                window.tr("Permission required"),
+                window.tr(
+                    "Camera or microphone access was denied.\n"
+                    "Open System Settings → Privacy & Security → Camera "
+                    "(and Microphone) and enable KVM Card Mini, then reopen "
+                    "the capture device."
+                ),
+            )
+
+    for permission in permissions:
+        status = app.checkPermission(permission)
+        logger.info(f"Media permission {type(permission).__name__}: {status}")
+        if status == Qt.PermissionStatus.Undetermined:
+            app.requestPermission(permission, window, _on_result)
+        elif status == Qt.PermissionStatus.Denied:
+            QMessageBox.warning(
+                window,
+                window.tr("Permission required"),
+                window.tr(
+                    "Camera or microphone access was denied.\n"
+                    "Open System Settings → Privacy & Security → Camera "
+                    "(and Microphone) and enable KVM Card Mini, then reopen "
+                    "the capture device."
+                ),
+            )
+            break
+
+
 def main():
     argv = sys.argv
-    if dark_theme:
+    if dark_theme and IS_WINDOWS:
         argv += [
             "-platform",
             "windows:darkmode=2",
@@ -3095,6 +3395,8 @@ def main():
             "Windows",
         ]  # or "Fusion" ?
     app = QApplication(argv)
+    app.setApplicationName(APP_DISPLAY_NAME)
+    app.setOrganizationName(APP_DISPLAY_NAME)
     translator = QTranslator(app)
     if translation:
         if translator.load(os.path.join(PATH, "trans_cn.qm")):
@@ -3104,15 +3406,24 @@ def main():
         if translator2.load(os.path.join(PATH, "qtbase_cn.qm")):
             app.installTranslator(translator2)
     myWin = MyMainWindow()
-    qdarktheme.setup_theme(
-        theme="dark" if dark_theme else "light",
-        custom_colors={
-            "[dark]": {
-                "background>base": "#1f2021",
-            }
-        },
-    )
+    app.installEventFilter(myWin)
+    theme_name = "dark" if dark_theme else "light"
+    if hasattr(qdarktheme, "setup_theme"):
+        qdarktheme.setup_theme(
+            theme=theme_name,
+            custom_colors={
+                "[dark]": {
+                    "background>base": "#1f2021",
+                }
+            },
+        )
+    else:
+        app.setStyleSheet(qdarktheme.load_stylesheet(theme_name))
     myWin.show()
+    myWin.raise_()
+    myWin.activateWindow()
+    if IS_MACOS:
+        QTimer.singleShot(0, lambda: _request_macos_media_permissions(app, myWin))
     QTimer.singleShot(100, myWin.shortcut_status)
     clear_splash()
     return app.exec()

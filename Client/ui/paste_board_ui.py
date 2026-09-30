@@ -25,8 +25,8 @@ class Ui_Dialog(object):
         if not Dialog.objectName():
             Dialog.setObjectName(u"Dialog")
         Dialog.setWindowModality(Qt.WindowModal)
-        Dialog.resize(400, 364)
-        Dialog.setMaximumSize(QSize(999999, 999999))
+        Dialog.resize(420, 400)
+        Dialog.setMinimumSize(QSize(360, 280))
         self.gridLayout = QGridLayout(Dialog)
         self.gridLayout.setObjectName(u"gridLayout")
         self.tabWidget = QTabWidget(Dialog)

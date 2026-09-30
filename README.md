@@ -8,18 +8,27 @@ Simple KVM Console to USB
 
 ## About
 
-**修改自 [Jackadminx/KVM-Card-Mini](https://github.com/Jackadminx/KVM-Card-Mini)**
+桌面客户端（Windows / Linux / macOS）维护：[kiramint](https://github.com/kiramint/)。跨平台客户端、macOS 打包与文档有 Grok（xAI）协助。
 
-增加主题/音频路由/录制/截图/内置远程服务器(魔改自Open-IP-KVM)/屏蔽系统键/剪贴板/无需系统支持的文件传输/特殊按键键盘等等功能, 迁移到PySide6以获得更好的nuitka支持, 优化了大量原版功能, 因为代码变动过大因此不对原项目PR
+本仓库改自：
+
+- 原项目：[Jackadminx/KVM-Card-Mini](https://github.com/Jackadminx/KVM-Card-Mini)
+- PySide6 重写：[ElluIFX](https://github.com/ElluIFX)（主题 / 音频路由 / 录制 / 截图 / 内置远程服务器，魔改自 Open-IP-KVM / 屏蔽系统键 / 剪贴板 / 无需系统支持的文件传输 / 特殊按键键盘等）
+
+代码变动较大，不对原项目提 PR。
 
 > [!TIP]
 > 如果需要寻找一个非自制获取硬件的方案, 可参考[binnehot的文章](https://github.com/binnehot/KVM_over_USB_Q05)和[do21发现的问题](https://github.com/do21/KVM_over_USB_Q05)
-> 
-> 如果你正尝试在linux或macos上运行本项目, 可参考[#4](https://github.com/ElluIFX/KVM-Card-Mini-PySide6/issues/4)中的已知问题解决方法, 精力有限暂时无法处理跨平台适配问题
 >
-> 基于WebUSB的纯浏览器客户端版本见web分支，感谢 @wang3076
+> Linux 见 [Docs/linux.md](./Docs/linux.md)，macOS 见 [Docs/macos.md](./Docs/macos.md)。非 Windows 平台不做全局键钩，系统键请用「键盘 → 系统快捷键」。
+>
+> 客户端内置 Web KVM 默认端口为 **5001**（macOS 的 AirPlay Receiver 占用 5000）。`Server_Standalone` 仍默认 5000。
+>
+> 基于 WebUSB 的纯浏览器客户端见 web 分支，感谢 @wang3076
 
-## Screenshot 
+程序内 **关于** 菜单打开多页说明（关于 / 作者 / 致谢 / 许可）。
+
+## Screenshot
 
 ![Screenshot1](./Docs/Images/Screenshot1.png)
 
@@ -27,7 +36,25 @@ Simple KVM Console to USB
 
 ## Development
 
-> [!IMPORTANT]
-> 因为git的问题, 文件夹Client/data似乎没自动从Data变更为data, 请手动改名再编译, 如果直接用release文件的话可以无视, 这个版本把data编译进单文件了, 只需要直接运行exe即可
+依赖用 [uv](https://docs.astral.sh/uv/) 管理（`Client/pyproject.toml` + `Client/uv.lock`）。Windows 专用包带平台标记，其它系统不会安装。Python 3.10–3.13。
 
-跨平台版本见cross-platform分支
+```bash
+cd Client
+uv sync
+uv run python Mini-KVM.py
+```
+
+macOS 采集卡需要 `.app` 才能弹出相机权限，打包：
+
+```bash
+cd Client
+./compiler-macos.sh
+open build_macos/Mini-KVM.app
+```
+
+打包结果在 `Client/build_macos/Mini-KVM.app`（显示名 KVM Card Mini，bundle id `dev.kiramint.kvm-card-mini`）。配置和错误日志在 `~/Library/Application Support/KVM Card Mini/`。窗口内鼠标跟踪需要这套 `.app` 里的 overlay，不要用完全透明遮罩。
+
+给 Agent 的仓库说明见 [AGENTS.md](./AGENTS.md)。
+
+> [!IMPORTANT]
+> 因为 git 的问题, 文件夹 Client/data 似乎没自动从 Data 变更为 data, 请手动改名再编译, 如果直接用 release 文件的话可以无视, 这个版本把 data 编译进单文件了, 只需要直接运行 exe 即可。源码树会同时识别 `Data/` 和 `data/`。

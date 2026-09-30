@@ -1,0 +1,7 @@
+# KVM Card Mini (CH58x HID, VID 413d / PID 2107)
+# Install:
+#   sudo cp Docs/udev/99-kvm-card-mini.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules
+#   sudo udevadm trigger
+# Then unplug/replug the device, or add your user to plugdev and re-login.
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="413d", ATTRS{idProduct}=="2107", MODE="0660", TAG+="uaccess", GROUP="plugdev"

@@ -48,10 +48,16 @@ dkms.conf
 
 
 venv/
+.venv/
+Client/.venv/
+Client/uv.lock.bak
+__pycache__/
+.python-version
 *.pyc
 obj/
 build/
 build_console/
+build_macos/
 .idea/
 .vscode/
 *.mk

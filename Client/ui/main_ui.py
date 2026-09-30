@@ -149,10 +149,8 @@ class Ui_MainWindow(object):
         self.actionRefresh_device_list.setObjectName(u"actionRefresh_device_list")
         self.actionWeb_client = QAction(MainWindow)
         self.actionWeb_client.setObjectName(u"actionWeb_client")
-        self.actionAuthor = QAction(MainWindow)
-        self.actionAuthor.setObjectName(u"actionAuthor")
-        self.actionRaw_author = QAction(MainWindow)
-        self.actionRaw_author.setObjectName(u"actionRaw_author")
+        self.actionAbout = QAction(MainWindow)
+        self.actionAbout.setObjectName(u"actionAbout")
         self.actionRelative_mouse = QAction(MainWindow)
         self.actionRelative_mouse.setObjectName(u"actionRelative_mouse")
         self.actionRelative_mouse.setCheckable(True)
@@ -222,7 +220,7 @@ class Ui_MainWindow(object):
         self.kvmSetPortSpin.setObjectName(u"kvmSetPortSpin")
         self.kvmSetPortSpin.setMinimumSize(QSize(70, 0))
         self.kvmSetPortSpin.setMaximum(32768)
-        self.kvmSetPortSpin.setValue(5000)
+        self.kvmSetPortSpin.setValue(5001)
 
         self.verticalLayout_2.addWidget(self.kvmSetPortSpin)
 
@@ -425,9 +423,7 @@ class Ui_MainWindow(object):
         self.menuServer.addAction(self.actionRefresh_device_list)
         self.menuServer.addSeparator()
         self.menuServer.addAction(self.actionWeb_client)
-        self.menuAbout.addAction(self.actionAuthor)
-        self.menuAbout.addSeparator()
-        self.menuAbout.addAction(self.actionRaw_author)
+        self.menuAbout.addAction(self.actionAbout)
 
         self.retranslateUi(MainWindow)
 
@@ -506,8 +502,7 @@ class Ui_MainWindow(object):
 #endif // QT_CONFIG(statustip)
         self.actionRefresh_device_list.setText(QCoreApplication.translate("MainWindow", u"Refresh device list", None))
         self.actionWeb_client.setText(QCoreApplication.translate("MainWindow", u"Web client", None))
-        self.actionAuthor.setText(QCoreApplication.translate("MainWindow", u"Author: @ElluIFX", None))
-        self.actionRaw_author.setText(QCoreApplication.translate("MainWindow", u"Raw author: @Jackadminx", None))
+        self.actionAbout.setText(QCoreApplication.translate("MainWindow", u"About KVM Card Mini...", None))
         self.actionRelative_mouse.setText(QCoreApplication.translate("MainWindow", u"Relative mouse", None))
         self.actionUSB_Switch_Set.setText(QCoreApplication.translate("MainWindow", u"USB Switch Set", None))
         self.actionUSB_Auto_Switch.setText(QCoreApplication.translate("MainWindow", u"USB Auto Switch", None))

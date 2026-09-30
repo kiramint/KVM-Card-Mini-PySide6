@@ -24,8 +24,8 @@ class Ui_Dialog(object):
         if not Dialog.objectName():
             Dialog.setObjectName(u"Dialog")
         Dialog.setWindowModality(Qt.NonModal)
-        Dialog.resize(279, 259)
-        Dialog.setMaximumSize(QSize(16777215, 300))
+        Dialog.resize(320, 320)
+        Dialog.setMinimumSize(QSize(280, 180))
         Dialog.setLayoutDirection(Qt.LeftToRight)
         self.formLayout = QFormLayout(Dialog)
         self.formLayout.setObjectName(u"formLayout")

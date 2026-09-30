@@ -23,9 +23,8 @@ class Ui_Dialog(object):
         if not Dialog.objectName():
             Dialog.setObjectName(u"Dialog")
         Dialog.setWindowModality(Qt.WindowModal)
-        Dialog.resize(400, 45)
-        Dialog.setMinimumSize(QSize(400, 45))
-        Dialog.setMaximumSize(QSize(400, 45))
+        Dialog.resize(440, 110)
+        Dialog.setMinimumSize(QSize(400, 80))
         self.gridLayout = QGridLayout(Dialog)
         self.gridLayout.setObjectName(u"gridLayout")
         self.horizontalLayout = QHBoxLayout()

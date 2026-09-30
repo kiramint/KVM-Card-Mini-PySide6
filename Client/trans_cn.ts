@@ -820,13 +820,8 @@ del</source>
     </message>
     <message>
         <location filename="ui/main.ui" line="844"/>
-        <source>Author: @ElluIFX</source>
-        <translation>作者：@ElluIFX</translation>
-    </message>
-    <message>
-        <location filename="ui/main.ui" line="849"/>
-        <source>Raw author: @Jackadminx</source>
-        <translation>原项目作者：@Jackadminx</translation>
+        <source>About KVM Card Mini...</source>
+        <translation>关于 KVM Card Mini...</translation>
     </message>
     <message>
         <location filename="ui/main.ui" line="857"/>
@@ -1256,6 +1251,93 @@ Stay cursor at left top corner to show toolbar</source>
         <location filename="main.py" line="2639"/>
         <source>Server is running, stop it?</source>
         <translation>服务器正在运行，是否停止？</translation>
+    </message>
+</context>
+<context>
+    <name>AboutDialog</name>
+    <message>
+        <source>About</source>
+        <translation>关于</translation>
+    </message>
+    <message>
+        <source>Authors</source>
+        <translation>作者</translation>
+    </message>
+    <message>
+        <source>Thanks</source>
+        <translation>致谢</translation>
+    </message>
+    <message>
+        <source>License</source>
+        <translation>许可</translation>
+    </message>
+    <message>
+        <source>Simple USB KVM console</source>
+        <translation>简单的 USB KVM 控制台</translation>
+    </message>
+    <message>
+        <source>A desktop client that shows the capture-card video and sends keyboard and mouse over a CH58x vendor HID device.</source>
+        <translation>桌面客户端：显示采集卡画面，并通过 CH58x vendor HID 发送键盘和鼠标。</translation>
+    </message>
+    <message>
+        <source>This fork runs on Windows, Linux, and macOS.</source>
+        <translation>本 fork 支持 Windows、Linux 与 macOS。</translation>
+    </message>
+    <message>
+        <source>Maintainer:</source>
+        <translation>维护者：</translation>
+    </message>
+    <message>
+        <source>Original project</source>
+        <translation>原项目</translation>
+    </message>
+    <message>
+        <source>Hardware design and the original KVM-Card-Mini host software.</source>
+        <translation>硬件设计与原始 KVM-Card-Mini 上位机。</translation>
+    </message>
+    <message>
+        <source>PySide6 rewrite</source>
+        <translation>PySide6 重写</translation>
+    </message>
+    <message>
+        <source>Themes, recording, built-in KVM server, paste board, and Nuitka packaging.</source>
+        <translation>主题、录制、内置 KVM 服务器、剪贴板与 Nuitka 打包。</translation>
+    </message>
+    <message>
+        <source>This fork</source>
+        <translation>本 fork</translation>
+    </message>
+    <message>
+        <source>Cross-platform desktop client for Windows, Linux, and macOS.</source>
+        <translation>Windows / Linux / macOS 桌面客户端。</translation>
+    </message>
+    <message>
+        <source>Assisted with the cross-platform client, packaging, and documentation.</source>
+        <translation>协助完成跨平台客户端、打包与文档。</translation>
+    </message>
+    <message>
+        <source>Original repository:</source>
+        <translation>原仓库：</translation>
+    </message>
+    <message>
+        <source>original hardware and client.</source>
+        <translation>原始硬件与客户端。</translation>
+    </message>
+    <message>
+        <source>PySide6 rewrite and feature set this fork builds on.</source>
+        <translation>本 fork 所基于的 PySide6 重写与功能集。</translation>
+    </message>
+    <message>
+        <source>cross-platform client work.</source>
+        <translation>跨平台客户端工作。</translation>
+    </message>
+    <message>
+        <source>basis of the built-in web KVM server.</source>
+        <translation>内置 Web KVM 服务器的基础。</translation>
+    </message>
+    <message>
+        <source>WebUSB browser client on the web branch.</source>
+        <translation>web 分支上的 WebUSB 浏览器客户端。</translation>
     </message>
 </context>
 </TS>

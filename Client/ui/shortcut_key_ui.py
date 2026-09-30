@@ -23,9 +23,8 @@ class Ui_Dialog(object):
         if not Dialog.objectName():
             Dialog.setObjectName(u"Dialog")
         Dialog.setWindowModality(Qt.WindowModal)
-        Dialog.resize(400, 145)
-        Dialog.setMinimumSize(QSize(400, 145))
-        Dialog.setMaximumSize(QSize(400, 145))
+        Dialog.resize(440, 220)
+        Dialog.setMinimumSize(QSize(400, 160))
         self.gridLayout = QGridLayout(Dialog)
         self.gridLayout.setObjectName(u"gridLayout")
         self.pushButton_ctrl = QPushButton(Dialog)
