@@ -36,6 +36,7 @@ open build_macos/Mini-KVM.app
 
 ## 使用注意
 
+- 键鼠 HID：打开 **设备 → 视频设备** 时查找。未找到可点「重新查找」，或用菜单「Reload Key/Mouse」。先开软件再插卡即可。
 - Qt 在 macOS 上 `nativeScanCode()` 经常是 0，客户端改用 `nativeVirtualKey()` 映射到 PC Set-1。
 - Command 映射为被控机的 Windows/Meta 键。
 - 释放鼠标捕获：Right Ctrl 或菜单 **鼠标 → 释放鼠标**（Mac 键盘很少用 Right Ctrl）。

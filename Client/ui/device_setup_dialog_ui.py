@@ -16,8 +16,8 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QImage, QKeySequence, QLinearGradient, QPainter,
     QPalette, QPixmap, QRadialGradient, QTransform)
 from PySide6.QtWidgets import (QAbstractButton, QApplication, QCheckBox, QComboBox,
-    QDialog, QDialogButtonBox, QFormLayout, QLabel,
-    QSizePolicy, QWidget)
+    QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout, QLabel,
+    QPushButton, QSizePolicy, QWidget)
 
 class Ui_Dialog(object):
     def setupUi(self, Dialog):
@@ -25,10 +25,35 @@ class Ui_Dialog(object):
             Dialog.setObjectName(u"Dialog")
         Dialog.setWindowModality(Qt.NonModal)
         Dialog.resize(320, 320)
-        Dialog.setMinimumSize(QSize(280, 180))
+        Dialog.setMinimumSize(QSize(280, 210))
         Dialog.setLayoutDirection(Qt.LeftToRight)
         self.formLayout = QFormLayout(Dialog)
         self.formLayout.setObjectName(u"formLayout")
+        self.labelHid = QLabel(Dialog)
+        self.labelHid.setObjectName(u"labelHid")
+
+        self.formLayout.setWidget(0, QFormLayout.LabelRole, self.labelHid)
+
+        self.hidStatusLayout = QHBoxLayout()
+        self.hidStatusLayout.setObjectName(u"hidStatusLayout")
+        self.labelHidStatus = QLabel(Dialog)
+        self.labelHidStatus.setObjectName(u"labelHidStatus")
+        sizePolicy = QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        sizePolicy.setHorizontalStretch(1)
+        sizePolicy.setVerticalStretch(0)
+        sizePolicy.setHeightForWidth(self.labelHidStatus.sizePolicy().hasHeightForWidth())
+        self.labelHidStatus.setSizePolicy(sizePolicy)
+
+        self.hidStatusLayout.addWidget(self.labelHidStatus)
+
+        self.pushButtonHidRescan = QPushButton(Dialog)
+        self.pushButtonHidRescan.setObjectName(u"pushButtonHidRescan")
+        self.pushButtonHidRescan.setAutoDefault(False)
+
+        self.hidStatusLayout.addWidget(self.pushButtonHidRescan)
+
+        self.formLayout.setLayout(0, QFormLayout.FieldRole, self.hidStatusLayout)
+
         self.label = QLabel(Dialog)
         self.label.setObjectName(u"label")
 
@@ -114,6 +139,9 @@ class Ui_Dialog(object):
 
     def retranslateUi(self, Dialog):
         Dialog.setWindowTitle(QCoreApplication.translate("Dialog", u"Device setup", None))
+        self.labelHid.setText(QCoreApplication.translate("Dialog", u"Keyboard/Mouse", None))
+        self.labelHidStatus.setText(QCoreApplication.translate("Dialog", u"Not searched", None))
+        self.pushButtonHidRescan.setText(QCoreApplication.translate("Dialog", u"Search again", None))
         self.label.setText(QCoreApplication.translate("Dialog", u"Device", None))
         self.label_2.setText(QCoreApplication.translate("Dialog", u"Resolution", None))
         self.label_3.setText(QCoreApplication.translate("Dialog", u"Format", None))

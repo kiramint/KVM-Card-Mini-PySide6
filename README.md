@@ -22,6 +22,8 @@ Simple KVM Console to USB
 >
 > Linux 见 [Docs/linux.md](./Docs/linux.md)，macOS 见 [Docs/macos.md](./Docs/macos.md)。非 Windows 平台不做全局键钩，系统键请用「键盘 → 系统快捷键」。
 >
+> 键鼠 HID 在 **设备 → 视频设备** 对话框中查找（显示状态；未找到可点「重新查找」）。先开软件再插卡也可以。
+>
 > 客户端内置 Web KVM 默认端口为 **5001**（macOS 的 AirPlay Receiver 占用 5000）。`Server_Standalone` 仍默认 5000。
 >
 > 基于 WebUSB 的纯浏览器客户端见 web 分支，感谢 @wang3076

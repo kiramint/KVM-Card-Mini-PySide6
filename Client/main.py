@@ -259,7 +259,7 @@ class MyDeviceSetupDialog(QDialog, device_setup_dialog_ui.Ui_Dialog):
         super(MyDeviceSetupDialog, self).__init__(parent)
         self.setupUi(self)
         apply_resizable_dialog(
-            self, min_width=280, min_height=180, default_width=320, default_height=320
+            self, min_width=280, min_height=210, default_width=320, default_height=320
         )
 
 
@@ -365,6 +365,7 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
     _log_signal = Signal(str)
     _wheel_signal = Signal()
     _hid_signal = Signal(list)
+    _hid_init_result = Signal(int)
 
     def __init__(self, parent=None):
         self.ignore_event = False
@@ -383,6 +384,7 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
         self.audio_opened = False
         self.video_recording = False
         self.device_connected = False
+        self._hid_searching = False
         self._keyboard_grabbed = False
         self.fpsc = FPSCounter()
 
@@ -693,6 +695,9 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
         self.device_setup_dialog.comboBox.currentIndexChanged.connect(
             self.update_device_info
         )
+        self.device_setup_dialog.pushButtonHidRescan.clicked.connect(
+            self._rescan_hid_device
+        )
 
         self.action_fullscreen.triggered.connect(self.fullscreen_func)
         self.action_Resize_window.triggered.connect(self.resize_window_func)
@@ -796,7 +801,6 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
         self.indicator_timer.timeout.connect(self.update_indicatorLight)
         self.check_device_timer = QTimer()
         self.check_device_timer.timeout.connect(self.check_device_status)
-        self.check_device_timer.start(1000)
 
         self.mouse_scroll_timer = QTimer()
         self.mouse_scroll_timer.timeout.connect(self.mouse_scroll_stop)
@@ -820,8 +824,9 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
         self._hid_worker.moveToThread(self._hid_thread)
         self._hid_signal.connect(self._hid_worker.write, Qt.QueuedConnection)
         self._hid_worker.event_signal.connect(self.device_event_handle)
+        self._hid_init_result.connect(self._on_hid_init_result)
         self._hid_thread.start()
-        self.reset_keymouse(4)
+        self._hid_searching = False
 
         self.hook_state = False
         self.hook_manager = None
@@ -982,6 +987,114 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
         else:
             self.device_setup_dialog.comboBox_5.setCurrentIndex(0)
 
+    def _set_hid_dialog_status(self, state):
+        dlg = self.device_setup_dialog
+        if state == "searching":
+            dlg.labelHidStatus.setText(self.tr("Searching..."))
+            dlg.pushButtonHidRescan.setEnabled(False)
+        elif state == "found":
+            dlg.labelHidStatus.setText(self.tr("Found"))
+            dlg.pushButtonHidRescan.setEnabled(True)
+        elif state == "not_found":
+            dlg.labelHidStatus.setText(self.tr("Not found"))
+            dlg.pushButtonHidRescan.setEnabled(True)
+        else:
+            dlg.labelHidStatus.setText(self.tr("Not searched"))
+            dlg.pushButtonHidRescan.setEnabled(True)
+
+    def _start_hid_search(self):
+        if getattr(self, "_hid_searching", False):
+            return
+        self._hid_searching = True
+        self._set_hid_dialog_status("searching")
+
+        def job():
+            try:
+                code = hid_def.init_usb(hid_def.vendor_id, hid_def.usage_page)
+            except Exception as e:
+                logger.error(f"HID search failed: {e}")
+                code = 1
+            if code is None:
+                code = 1
+            self._hid_init_result.emit(int(code))
+
+        worker = getattr(self, "_hid_worker", None)
+        if worker is None:
+            job()
+            return
+        worker.submit(job, wait=False)
+
+    def _on_hid_init_result(self, hid_code):
+        self._hid_searching = False
+        if getattr(self, "_closing", False):
+            return
+        if hid_code == 0:
+            self.device_event_handle("hid_init_ok")
+            if self.status.get("mouse_capture"):
+                self.set_ws2812b(0, 30, 30)
+            else:
+                self.set_ws2812b(30, 30, 0)
+            self._set_hid_dialog_status("found")
+        else:
+            self.device_event_handle("hid_init_error")
+            self._set_hid_dialog_status("not_found")
+
+    def _populate_video_device_combo(self, restore_saved=False):
+        dlg = self.device_setup_dialog
+        if restore_saved:
+            remember_name = self.video_config["device_name"]
+            remember_res = (
+                str(self.video_config["resolution_X"])
+                + "x"
+                + str(self.video_config["resolution_Y"])
+            )
+            remember_fmt = self.video_config["format"]
+        else:
+            remember_name = dlg.comboBox.currentText()
+            remember_res = dlg.comboBox_2.currentText()
+            remember_fmt = dlg.comboBox_3.currentText()
+
+        dlg.comboBox.blockSignals(True)
+        dlg.comboBox.clear()
+        cameras = QMediaDevices.videoInputs()
+        devices = []
+        for camera in cameras:
+            dlg.comboBox.addItem(camera.description())
+            devices.append(camera.description())
+        self.camera_list_inited = True
+        saved_missing = restore_saved and remember_name not in devices
+        if remember_name in devices:
+            dlg.comboBox.setCurrentText(remember_name)
+        elif devices:
+            dlg.comboBox.setCurrentIndex(0)
+        dlg.comboBox.blockSignals(False)
+        self.update_device_info()
+        if saved_missing:
+            dlg.comboBox_2.setCurrentIndex(0)
+            dlg.comboBox_3.setCurrentIndex(0)
+            try:
+                self.video_config["resolution_X"] = (
+                    dlg.comboBox_2.currentText().split("x")[0]
+                )
+                self.video_config["resolution_Y"] = (
+                    dlg.comboBox_2.currentText().split("x")[1]
+                )
+            except IndexError:
+                self.video_config["resolution_X"] = 0
+                self.video_config["resolution_Y"] = 0
+            self.video_config["format"] = dlg.comboBox_3.currentText()
+            return
+        if remember_res and dlg.comboBox_2.findText(remember_res) >= 0:
+            dlg.comboBox_2.setCurrentText(remember_res)
+        if remember_fmt and dlg.comboBox_3.findText(remember_fmt) >= 0:
+            dlg.comboBox_3.setCurrentText(remember_fmt)
+
+    def _rescan_hid_device(self):
+        self._populate_video_device_combo(restore_saved=False)
+        if self.device_setup_dialog.checkBoxAudio.isChecked():
+            self.update_audio_devices()
+        self._start_hid_search()
+
     # 弹出采集卡设备设置窗口，并打开采集卡设备
     def device_config(self):
         if self.serverFrame.isVisible():
@@ -992,48 +1105,17 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
             )
             return False
 
-        self.device_setup_dialog.comboBox.clear()
-        cameras = QMediaDevices.videoInputs()
-        remember_name = self.video_config["device_name"]
-        # self.video_config["device_name"] = ""
-        devices = []
-        for camera in cameras:
-            self.device_setup_dialog.comboBox.addItem(camera.description())
-            devices.append(camera.description())
-        self.camera_list_inited = True
-        if remember_name in devices:
-            self.device_setup_dialog.comboBox.setCurrentText(remember_name)
-            self.update_device_info()
-            resolution_str = (
-                    str(self.video_config["resolution_X"])
-                    + "x"
-                    + str(self.video_config["resolution_Y"])
-            )
-            self.device_setup_dialog.comboBox_2.setCurrentText(resolution_str)
-            self.device_setup_dialog.comboBox_3.setCurrentText(
-                self.video_config["format"]
-            )
-        else:
-            self.device_setup_dialog.comboBox.setCurrentIndex(0)
-            self.update_device_info()
-            self.device_setup_dialog.comboBox_2.setCurrentIndex(0)
-            self.device_setup_dialog.comboBox_3.setCurrentIndex(0)
-            try:
-                self.video_config["resolution_X"] = (
-                    self.device_setup_dialog.comboBox_2.currentText().split("x")[0]
-                )
-                self.video_config["resolution_Y"] = (
-                    self.device_setup_dialog.comboBox_2.currentText().split("x")[1]
-                )
-            except IndexError:
-                self.video_config["resolution_X"] = 0
-                self.video_config["resolution_Y"] = 0
-            self.video_config["format"] = (
-                self.device_setup_dialog.comboBox_3.currentText()
-            )
+        self._populate_video_device_combo(restore_saved=True)
 
         if self.device_setup_dialog.checkBoxAudio.isChecked():
             self.update_audio_devices()
+
+        if self.device_connected:
+            self._set_hid_dialog_status("found")
+        elif getattr(self, "_hid_searching", False):
+            self._set_hid_dialog_status("searching")
+        else:
+            self._start_hid_search()
 
         wm_pos = self.geometry()
         wm_size = self.size()
@@ -1417,6 +1499,8 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
                 self.resize_window_func(center=center)
             fps = self.camera.cameraFormat().maxFrameRate()
             self.device_event_handle("video_ok")
+            if not self.device_connected:
+                self._start_hid_search()
             self._show_kvm_view(video=True)
             self._video_child_count = -1
             self._wire_viewport_mouse(self.videoWidget)
@@ -1571,23 +1655,7 @@ class MyMainWindow(QMainWindow, main_ui.Ui_MainWindow):
             elif hidinfo == 0:
                 self.device_event_handle("hid_ok")
         elif s == 4:  # hid
-            worker = getattr(self, "_hid_worker", None)
-            if worker is None:
-                hid_code = hid_def.init_usb(hid_def.vendor_id, hid_def.usage_page)
-            else:
-                hid_code = worker.submit(
-                    lambda: hid_def.init_usb(hid_def.vendor_id, hid_def.usage_page),
-                    wait=True,
-                    timeout=8.0,
-                )
-            if hid_code == 0:
-                self.device_event_handle("hid_init_ok")
-                if self.status["mouse_capture"]:
-                    self.set_ws2812b(0, 30, 30)
-                else:
-                    self.set_ws2812b(30, 30, 0)
-            else:
-                self.device_event_handle("hid_init_error")
+            self._start_hid_search()
 
     # 自定义组合键窗口
     def shortcut_key_func(self, s):

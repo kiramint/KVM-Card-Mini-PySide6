@@ -67,6 +67,7 @@ GitHub Actions: `.github/workflows/build.yml` on push / `workflow_dispatch`. Run
 
 ## Input notes
 
+- Do not call `init_usb` / `reset_keymouse(4)` at window init. HID search runs when **Device → Video devices** opens (`_start_hid_search`), with status on `labelHidStatus` and retry via `pushButtonHidRescan` (also refreshes cameras). `set_device(True)` searches if HID is not connected (covers auto-connect). **Reload Key/Mouse** uses the same async path.
 - Windows HID open lists paths with cfgmgr32; do not enumerate every HID device (causes keyboard stutter).
 - Linux hidapi often reports `usage_page` 0.
 - `hid.open` without the card raises `OSError` quickly on macOS.
