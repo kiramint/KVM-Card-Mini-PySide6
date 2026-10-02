@@ -67,6 +67,8 @@ open build_macos/Mini-KVM.app
 
 macOS 包显示名 KVM Card Mini，bundle id `dev.kiramint.kvm-card-mini`。配置和错误日志在 `~/Library/Application Support/KVM Card Mini/`。窗口内鼠标跟踪需要这套 `.app` 里的 overlay，不要用完全透明遮罩。
 
+Linux（含 AppImage）配置和错误日志在 `~/.local/share/mini-kvm/`。
+
 推送仓库会跑 [`.github/workflows/build.yml`](./.github/workflows/build.yml)，产物：
 
 | Artifact | 内容 | Runner |

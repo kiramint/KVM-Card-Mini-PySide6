@@ -6,7 +6,17 @@ import traceback
 
 
 def _log_dir():
-    if sys.platform == "darwin" and (
+    try:
+        from platform_util import user_data_dir
+
+        return user_data_dir()
+    except Exception:
+        pass
+    if sys.platform.startswith("linux"):
+        path = os.path.join(
+            os.path.expanduser("~"), ".local", "share", "mini-kvm"
+        )
+    elif sys.platform == "darwin" and (
         getattr(sys, "frozen", False) or "__compiled__" in globals()
     ):
         path = os.path.join(
@@ -15,9 +25,10 @@ def _log_dir():
             "Application Support",
             "KVM Card Mini",
         )
-        os.makedirs(path, exist_ok=True)
-        return path
-    return os.path.dirname(os.path.abspath(sys.argv[0]))
+    else:
+        return os.path.dirname(os.path.abspath(sys.argv[0]))
+    os.makedirs(path, exist_ok=True)
+    return path
 
 
 def error_log(msg):

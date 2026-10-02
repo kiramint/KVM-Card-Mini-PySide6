@@ -57,6 +57,8 @@ INSTALL_DEPS=1 ./compiler-linux.sh
 
 打包 Python 默认 3.12。`INSTALL_DEPS=1` 会 `apt` 安装 gcc、patchelf、libhidapi、GStreamer、xcb、`file` 和 `libfuse2`（Nuitka 下载的 `appimagetool` 本身是 AppImage，需要 `libfuse.so.2`）。打开 HID 仍需要上面的 udev 规则。GitHub Actions 会在 `ubuntu-24.04` 和 `ubuntu-24.04-arm` 上各打一份。
 
+AppImage 挂载目录只读。配置和错误日志写在 `~/.local/share/mini-kvm/`（`config.yaml`、`error.log`）。源码直接运行时也用这个目录。
+
 ## 使用注意
 
 - 键鼠 HID：打开 **设备 → 视频设备** 时查找。未找到可点「重新查找」，或用菜单「Reload Key/Mouse」。

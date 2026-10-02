@@ -56,7 +56,7 @@ GitHub Actions: `.github/workflows/build.yml` on push / `workflow_dispatch`. Run
 
 - Capture-card HID is VID `0x413D` PID `0x2107`, usage page `0xFF00`. Video is UVC.
 - Client KVM web port default is `kvmSetPortSpin` in `Client/ui/main.ui` and `Client/ui/main_ui.py` (**5001**). macOS AirPlay occupies 5000.
-- Bundled macOS config and `error.log` go to `~/Library/Application Support/KVM Card Mini/` via `user_data_dir()`.
+- Linux config and `error.log` go to `~/.local/share/mini-kvm/` via `user_data_dir()` (AppImage squashfs is read-only). Bundled macOS config and `error.log` go to `~/Library/Application Support/KVM Card Mini/`.
 - Source data dir is `Client/Data` (also accepts `data/`). Nuitka packages it as `data`.
 - Child dialogs must stay height-resizable: `apply_resizable_dialog()` in `platform_util.py`. Do not lock height with `setFixedHeight`, `setMaximumHeight`, or `Qt.CustomizeWindowHint`.
 - About menu opens `AboutDialog`. Credits: Jackadminx, ElluIFX, https://github.com/kiramint/, Grok (xAI). Do not put the two original authors back as standalone menu links.

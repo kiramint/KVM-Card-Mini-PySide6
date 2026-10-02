@@ -62,9 +62,16 @@ def is_bundled() -> bool:
 def user_data_dir() -> str:
     """Writable config/log directory.
 
-    Packaged macOS apps live in a read-only bundle, so config cannot sit
-    next to the executable the way it does in the source tree.
+    Linux AppImage and packaged macOS apps live on a read-only filesystem,
+    so config cannot sit next to the executable the way it does in the
+    Windows onefile and source-tree layouts.
     """
+    if IS_LINUX:
+        path = os.path.join(
+            os.path.expanduser("~"), ".local", "share", "mini-kvm"
+        )
+        os.makedirs(path, exist_ok=True)
+        return path
     if is_bundled() and IS_MACOS:
         path = os.path.join(
             os.path.expanduser("~"),
